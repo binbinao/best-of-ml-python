@@ -60,9 +60,9 @@
 ### 3.4 分类目门槛(已验证)
 
 - **已验证:best-of-generator(0.8.6,与上游 master 一致)不支持 per-category `min_stars`,仅全局 `configuration.min_stars` 生效**(结论 B)。
-- 证据(源码:`pip download best-of==0.8.6` 解包 + 上游 master 核对,两处一致):
-  - `src/best_of/generator.py:38-46`:`min_stars` 只从 `projects.yaml` 顶层 `configuration` 块经 `prepare_configuration()` 读入;`categories` 条目经 `prepare_categories()` 只保留 `category`/`title`/`subtitle`/`ignore` 等展示属性。
-  - `src/best_of/projects_collection.py:421-426`(`apply_filters()`):星标过滤唯一读取点为 `configuration.min_stars`(`int(project_info.star_count) < int(configuration.min_stars) → project_info.show = False`),函数签名只接收全局 `configuration`,不接收 `categories`,无任何按类目分支。
+- 证据(源码:`pip download best-of==0.8.6` 解包 + 上游 master 核对,两处一致;行号以 master 为准):
+  - `src/best_of/generator.py:38-46`:`min_stars` 只从 `projects.yaml` 顶层 `configuration` 块经 `prepare_configuration()` 读入;`categories` 条目经 `prepare_categories()` 原样转 `Dict` 全量透传,装配期不做属性过滤。
+  - `src/best_of/projects_collection.py:427-433`(`apply_filters()`):星标过滤唯一读取点为全局 `configuration.min_stars`(`int(project_info.star_count) < int(configuration.min_stars) → project_info.show = False`);该函数签名只接收全局 `configuration`,不接收 `categories`,且全包无任何代码读取 `categories[].min_stars`——阻塞机制是**装配期全量透传、下游无消费路径**,而非装配过滤。
   - `src/best_of/default_config.py:28-29`:`prepare_configuration()` 的缺省兜底(`config.min_stars = 100`)同样只作用于全局配置对象。
   - 上游文档(README Configuration/Category Properties 章节):`min_stars` 仅列于 `configuration` 属性表;Category 属性表仅含 `category`/`title`/`subtitle`/`ignore`,无 `min_stars`。
 - 阶段一处置:维持全局 `min_stars: 300` 不变,策展批次仅收星标 ≥300 的候选(头部候选 vLLM/Ollama/LangChain 等均远超 300);「5 个新类目放宽至 100」的差异化门槛转为「后续给上游(best-of-lists/best-of-generator)提 patch」待办,不阻塞本阶段。Task 5 准入过滤按 ≥300 执行。
