@@ -27,3 +27,16 @@ This curated list contains {project_count} awesome open-source projects with a t
 ---
 
 
+
+## How to Use This List in the AI-Coding Era
+
+AI can now write most of the code in this list from a one-paragraph prompt. What it cannot do is decide **what the business problem actually is**, or catch the failure mode where generated code runs perfectly, passes every metric, and still solves the wrong problem. This list is organized accordingly: it is a **map of solution paradigms and the principles you must hold in order to direct and review AI-generated ML code** — not an API directory.
+
+**Practical posture per category:**
+
+1. **Start from the business question, not the library.** Each category below states the business problems it answers. Pick the paradigm before letting an AI pick the tool.
+2. **Know the principle that gates the category.** Every category names the concepts you need to review AI output competently — e.g. target leakage in modeling, distribution shift in deployment, recall/precision tradeoffs in retrieval.
+3. **Use the review checklists before accepting AI code.** For the core categories, [REVIEW-CHECKLISTS.md](REVIEW-CHECKLISTS.md) lists the questions to ask an AI assistant *before* its code is trusted: How was the data split? What does the metric optimize versus what the business needs? Where could leakage hide?
+4. **Mechanical correctness is machine-gated here.** Repository-level checks (`scripts/validate.py`, CI) catch structural errors so that human attention stays on judgment: problem framing, data legitimacy, and whether the evaluation measures the business outcome.
+
+The ranked ordering within categories still reflects project-quality scores (stars, downloads, contributors) — a proxy for ecosystem maturity, not a statement of fitness for your problem. Fitness is your call; that is the point.
