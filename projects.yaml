@@ -159,7 +159,7 @@ labels:
     image: "https://keras.io/favicon.ico"
     description: "Keras related project"
   - label: "xgboost"
-    image: "https://xgboost.readthedocs.io/en/latest/_static/favicon.png"
+    image: "https://xgboost.readthedocs.io/favicon.ico"
     description: "XGBoost related project"
 
 projects:
