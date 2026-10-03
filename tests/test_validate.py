@@ -65,3 +65,16 @@ def test_yaml_parse_error_reported(tmp_path):
     p.write_text("projects: [\n", encoding="utf-8")
     errs = validate_projects_yaml(str(p))
     assert any("YAML parse error" in e for e in errs)
+
+def test_others_category_implicitly_valid(tmp_path):
+    doc = _valid_doc()
+    doc["projects"][0]["category"] = "others"  # categories 块无 others 定义,应被视为合法兜底
+    errs = validate_projects_yaml(_write(tmp_path, doc))
+    assert errs == []
+
+def test_labels_not_a_list_flagged(tmp_path):
+    doc = _valid_doc()
+    doc["projects"][0]["labels"] = "others"  # 裸字符串,非 list
+    errs = validate_projects_yaml(_write(tmp_path, doc))
+    assert len(errs) == 1
+    assert any("labels must be a list" in e for e in errs)

@@ -24,7 +24,7 @@ def validate_projects_yaml(path: str) -> list[str]:
     if errors:
         return errors
 
-    category_ids = {c.get("category") for c in doc["categories"] if isinstance(c, dict)}
+    category_ids = {c.get("category") for c in doc["categories"] if isinstance(c, dict)} | {"others"}
     label_ids = {l.get("label") for l in doc["labels"] if isinstance(l, dict)}
     seen_names: dict[str, int] = {}
     for idx, proj in enumerate(doc["projects"], start=1):
@@ -46,9 +46,15 @@ def validate_projects_yaml(path: str) -> list[str]:
         category = proj.get("category")
         if category is not None and category not in category_ids:
             errors.append(f"{path}: project '{name or idx}': undefined category '{category}'")
-        for label in proj.get("labels") or []:
-            if label not in label_ids:
-                errors.append(f"{path}: project '{name or idx}': undefined label '{label}'")
+        labels = proj.get("labels")
+        if labels is None:
+            pass
+        elif not isinstance(labels, list):
+            errors.append(f"{path}: project '{name or idx}': labels must be a list (got {type(labels).__name__})")
+        else:
+            for label in labels:
+                if label not in label_ids:
+                    errors.append(f"{path}: project '{name or idx}': undefined label '{label}'")
     return errors
 
 
