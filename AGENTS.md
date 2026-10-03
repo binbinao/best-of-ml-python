@@ -47,11 +47,20 @@ There is no build system, Makefile, or package manifest. Local tooling is a set 
 
   ```bash
   /opt/homebrew/bin/python3 scripts/import_history.py               # history/ -> data/history.db
-  /opt/homebrew/bin/python3 scripts/analyze.py [db] <cmd>
+  /opt/homebrew/bin/python3 scripts/analyze.py <db> <cmd> [args...]   # db is required
   #   top <category> <N>   top-N projects in a category (latest week, by projectrank)
   #   trend <name>         weekly (week, star_count, projectrank) trajectory
   #   recent <N>           most recently added projects
   #   status <name>        latest-snapshot fields for one project
+  ```
+
+  Real invocations against the local DB:
+
+  ```bash
+  /opt/homebrew/bin/python3 scripts/analyze.py data/history.db top ml-frameworks 10
+  /opt/homebrew/bin/python3 scripts/analyze.py data/history.db trend PyTorch
+  /opt/homebrew/bin/python3 scripts/analyze.py data/history.db recent 5
+  /opt/homebrew/bin/python3 scripts/analyze.py data/history.db status transformers
   ```
 
 - **Run the tests** (14 cases: `test_validate.py` ×10, `test_history.py` ×4):
