@@ -4699,3 +4699,139 @@ projects:
     github_id: juspay/neurolink
     category: ml-frameworks
     description: Enterprise-grade LLM integration framework for building production-ready AI applications with built-in hallucination prevention, RAG, and MCP support
+  - name: vLLM
+    github_id: vllm-project/vllm
+    pypi_id: vllm
+    conda_id: conda-forge/vllm
+    category: inference-serving
+    labels: ["inference", "llm"]
+  - name: SGLang
+    github_id: sgl-project/sglang
+    pypi_id: sglang
+    category: inference-serving
+    labels: ["inference", "llm"]
+  - name: llama.cpp
+    github_id: ggml-org/llama.cpp
+    pypi_id: llama-cpp-python
+    conda_id: conda-forge/llama-cpp-python
+    category: inference-serving
+    labels: ["inference", "llm"]
+  - name: Ollama
+    github_id: ollama/ollama
+    pypi_id: ollama
+    category: inference-serving
+    labels: ["inference", "llm"]
+  - name: LangChain
+    github_id: langchain-ai/langchain
+    pypi_id: langchain
+    conda_id: conda-forge/langchain
+    category: agent-frameworks
+    labels: ["agent", "llm"]
+  - name: CrewAI
+    github_id: crewAIInc/crewAI
+    pypi_id: crewai
+    conda_id: conda-forge/crewai
+    category: agent-frameworks
+    labels: ["agent"]
+  - name: smolagents
+    github_id: huggingface/smolagents
+    pypi_id: smolagents
+    conda_id: conda-forge/smolagents
+    category: agent-frameworks
+    labels: ["agent", "huggingface"]
+  - name: pydantic-ai
+    github_id: pydantic/pydantic-ai
+    pypi_id: pydantic-ai
+    conda_id: conda-forge/pydantic-ai
+    category: agent-frameworks
+    labels: ["agent", "llm"]
+  - name: LlamaIndex
+    github_id: run-llama/llama_index
+    pypi_id: llama-index
+    conda_id: conda-forge/llama-index
+    category: rag-vectordb
+    labels: ["rag", "llm"]
+  - name: chromadb
+    github_id: chroma-core/chroma
+    pypi_id: chromadb
+    conda_id: conda-forge/chromadb
+    category: rag-vectordb
+    labels: ["rag"]
+  - name: LanceDB
+    github_id: lancedb/lancedb
+    pypi_id: lancedb
+    conda_id: conda-forge/lancedb
+    category: rag-vectordb
+    labels: ["rag"]
+  - name: txtai
+    github_id: neuml/txtai
+    pypi_id: txtai
+    conda_id: conda-forge/txtai
+    category: rag-vectordb
+    labels: ["rag"]
+  - name: instructor
+    github_id: 567-labs/instructor
+    pypi_id: instructor
+    conda_id: conda-forge/instructor
+    category: llm-frameworks
+    labels: ["llm"]
+  - name: diffusers
+    github_id: huggingface/diffusers
+    pypi_id: diffusers
+    conda_id: conda-forge/diffusers
+    category: llm-frameworks
+    labels: ["huggingface"]
+  - name: Whisper
+    github_id: openai/whisper
+    pypi_id: openai-whisper
+    conda_id: conda-forge/openai-whisper
+    category: llm-frameworks
+  - name: faster-whisper
+    github_id: SYSTRAN/faster-whisper
+    pypi_id: faster-whisper
+    category: llm-frameworks
+  - name: FunASR
+    github_id: modelscope/FunASR
+    pypi_id: funasr
+    category: llm-frameworks
+  - name: MLX
+    github_id: ml-explore/mlx
+    pypi_id: mlx
+    conda_id: conda-forge/mlx
+    category: llm-frameworks
+  - name: unsloth
+    github_id: unslothai/unsloth
+    pypi_id: unsloth
+    conda_id: conda-forge/unsloth
+    category: llm-frameworks
+    labels: ["llm"]
+  - name: peft
+    github_id: huggingface/peft
+    pypi_id: peft
+    conda_id: conda-forge/peft
+    category: llm-frameworks
+    labels: ["huggingface", "llm"]
+  - name: trl
+    github_id: huggingface/trl
+    pypi_id: trl
+    conda_id: conda-forge/trl
+    category: llm-frameworks
+    labels: ["huggingface", "llm"]
+  - name: bitsandbytes
+    github_id: bitsandbytes-foundation/bitsandbytes
+    pypi_id: bitsandbytes
+    conda_id: conda-forge/bitsandbytes
+    category: llm-frameworks
+    labels: ["pytorch", "llm"]
+  - name: openai-python
+    github_id: openai/openai-python
+    pypi_id: openai
+    conda_id: conda-forge/openai
+    category: llm-frameworks
+    labels: ["llm"]
+  - name: anthropic-sdk-python
+    github_id: anthropics/anthropic-sdk-python
+    pypi_id: anthropic
+    conda_id: conda-forge/anthropic
+    category: llm-frameworks
+    labels: ["llm"]
