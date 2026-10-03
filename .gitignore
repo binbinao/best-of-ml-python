@@ -96,3 +96,6 @@ temp/*
 .DS_Store
 
 .worktrees/
+
+# Local history database
+data/
