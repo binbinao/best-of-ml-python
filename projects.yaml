@@ -149,6 +149,18 @@ labels:
   - label: "jax"
     image: "https://jax.readthedocs.io/en/latest/_static/favicon.png"
     description: "Jax related project"
+  - label: "spacy"
+    image: "https://spacy.io/favicon.ico"
+    description: "spaCy related project"
+  - label: "huggingface"
+    image: "https://huggingface.co/favicon.ico"
+    description: "Hugging Face related project"
+  - label: "keras"
+    image: "https://keras.io/favicon.ico"
+    description: "Keras related project"
+  - label: "xgboost"
+    image: "https://xgboost.readthedocs.io/en/latest/_static/favicon.png"
+    description: "XGBoost related project"
 
 projects:
   - name: Tensorflow
@@ -3567,7 +3579,7 @@ projects:
     github_id: BerriAI/litellm
     pypi_id: litellm
     category: nlp
-    labels: others
+    labels: []
   - name: pyclustering
     github_id: annoviko/pyclustering
     pypi_id: pyclustering
@@ -4399,11 +4411,6 @@ projects:
     pypi_id: collie
     category: recommender-systems
     labels: ["pytorch"]
-  - name: Orbit
-    github_id: uber/orbit
-    pypi_id: orbit-ml
-    conda_id: conda-forge/orbit-ml
-    category: time-series-data
   - name: best-of-python - Data Containers
     github_id: ml-tooling/best-of-python
     category: data-containers
@@ -4533,10 +4540,6 @@ projects:
     github_id: OpenMined/PipelineDP
     category: privacy-ml
     pypi_id: pipeline-dp
-  - name: torchrec
-    github_id: pytorch/torchrec
-    category: recommender-systems
-    pypi_id: torchrec-nightly-cpu
   - name: anomalib
     github_id: openvinotoolkit/anomalib
     pypi_id: anomalib
@@ -4665,6 +4668,7 @@ projects:
     pypi_id: pathway
     docs_url: https://pathway.com/framework/
     category: data-pipelines
-  - github_id: juspay/neurolink
+  - name: neurolink
+    github_id: juspay/neurolink
     category: ml-frameworks
     description: Enterprise-grade LLM integration framework for building production-ready AI applications with built-in hallucination prevention, RAG, and MCP support
