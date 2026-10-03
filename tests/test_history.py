@@ -47,3 +47,10 @@ def test_queries_against_imported_db(tmp_path):
     assert recent[0][0] == "Alpha"
     status = query_status(db, "Beta")
     assert status["star_count"] == 50
+
+def test_empty_dir_returns_clean_zero(tmp_path):
+    db = str(tmp_path / "h.db")
+    empty = tmp_path / "empty_history"
+    empty.mkdir()
+    files, n = import_history(str(empty), db)
+    assert (files, n) == (0, 0)

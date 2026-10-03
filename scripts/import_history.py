@@ -11,6 +11,10 @@ def import_history(history_dir: str, db_path: str) -> tuple[int, int]:
     os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
     con = sqlite3.connect(db_path)
     paths = sorted(glob.glob(os.path.join(history_dir, "*_projects.csv")))
+    if not paths:
+        con.commit()
+        con.close()
+        return 0, 0
     # Real history CSVs evolved schema week to week. Build the union of all
     # columns so every file can be inserted by name with NULLs for the gaps.
     all_cols: list[str] = []
