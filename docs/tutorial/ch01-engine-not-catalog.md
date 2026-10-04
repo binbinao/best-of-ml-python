@@ -52,6 +52,8 @@
 
 `config/header.md` 的立场段(README 每次生成时嵌在正文之前)写着一句关键的话:这份清单是 **a map of solution paradigms and the principles you must hold in order to direct and review AI-generated ML code — not an API directory**。这句话不是修辞,是对使用方式的硬性要求。目录的用法是查"哪个库能做 X",引擎的用法是先定"X 到底该是什么",再决定要不要车。
 
+> 去哪读:这段话现在在 `config/header.md` 里,当前 README.md 尚未重新生成(还是 2025-10-30 那版),所以你在 README 上暂时搜不到 `AI-Coding Era` 这个标题。类目 subtitle 里的 "Gate your review on: ..." 同理,写在 `projects.yaml` 里,要等下一次定时生成才会渲染进 README。
+
 落到日常,四个姿态:
 
 **先业务问题,后工具。**每个类目开头那句 "For &lt;业务问题&gt;" 就是入口。先用业务语言描述问题,再让它把你映射到类目。顺序反过来,你会在搜索结果里挑一个"看起来能跑"的东西,然后花两周时间给一个错的模型找特征。
@@ -73,17 +75,27 @@
 把修好的校验器指向真实数据,它报出 **11 条错误**。逐条看,这 11 条对应的是 8 个根因:
 
 - **4 个标签定义缺失。** `spacy`、`huggingface`、`keras`、`xgboost` 四个标签在 `labels:` 块里根本没定义,却被 7 个项目引用——所以报出 7 条 `undefined label`。7 条错误,1 个根因。
-- **2 处重名。** `Orbit`(#871)和 `torchrec`(#904)各自与更早的条目同名,重复的 `name` 会让生成器无法唯一定位条目。
+- **2 处重名。** `Orbit`(#871)和 `torchrec`(#904)各自与更早的条目同名。两处都同名,但下面的证据显示:生成器没有报错,它**静默折叠**了重复的那一条。
 - **1 处缺 `name`。** 编号 #928 的条目(后来补上名字,成了 `neurolink`)压根没有 `name` 键。
 - **1 处类型错。** litellm 写的是 `labels: others`——裸字符串,不是列表。
 
 **litellm 这一处值得单独说。**它在第一版校验器上产生了 **6 条假阳性**:`undefined label 'o'`、`'t'`、`'h'`、`'e'`、`'r'`、`'s'`。原因是那行代码写的是 `for label in proj.get("labels") or []`——Python 把字符串当序列,**逐字符**迭代,于是 "others" 被拆成 o-t-h-e-r-s 六个"标签"去查表。真实问题是"类型不对",诊断却变成"这六个标签都没定义"。六条报错,零条有用信息。补上 `isinstance(labels, list)` 之后,它收敛成一条准确的:`project 'litellm': labels must be a list (got str)`。
 
-一个教训:**校验器给出的报错行数不等于问题的个数**。这里 11 条报错背后是 8 个根因;如果修第一版校验器,还会再多出 21 条 `undefined category 'others'` 的假阳性(累计 37 条)。审阅报错的方式必须是从上往下归类找根因,而不是从下往上逐条改。
+一个教训:**校验器给出的报错行数不等于问题的个数**。修好的校验器报 11 条,对应 8 个根因;第一版直接报 37 条,其中 21 条是 `others` 假阳性、6 条是 litellm 的逐字符碎片(`undefined label 'o'`、`'t'`、`'h'`、`'e'`、`'r'`、`'s'`)。审阅报错只能从上往下归类找根因,逐条从下往上改会被噪声淹没。
 
-现在说"延迟暴露"。`projects.yaml` 每一项的下游是每周四 14:00 UTC 的定时生成(`cron 0 14 * * 4`,东八区周四晚上 22:00),生成 README、`latest-changes.md` 和 `history/` 快照。10 月 3 日是周六。**如果那时没有校验层,这 11 处缺陷会一直躺在数据里,直到 10 月 8 日(周四)晚上那次定时任务才第一次真正去渲染它们**——而失败点会出现在生成器里,报错信息指向生成器,排查者会先去怀疑上游工具,而不是自己的数据。数据到出问题隔了 5 天,代码到出问题隔了 0 行。
+现在说最要紧的一件事:**这些缺陷其实从来没有"爆"过。**
 
-当天 18:33 的 commit 把 `validate.py` 插进了 CI,放在生成步骤**之前**。缺陷从"周四深夜爆炸"变成"提交时红灯"。**这就是第 4 节那条分工线**:结构性正确性交给机器,判断留给人——而前提是,交给机器的那个机器,得先被审一遍。
+`projects.yaml` 的下游是每周四 14:00 UTC 的定时生成(`cron 0 14 * * 4`),生成 README、`latest-changes.md` 和 `history/` 快照。而这些缺陷在被修掉之前,已经被成功生成过**很多次**了。
+
+- 2025 年 10 月 30 日那次生成(`10028bb`)完全成功,README、`latest-changes.md`、周快照全部正常产出。litellm 那个 `labels: others` 在当次 README 的第 1288 行被渲染成了六个碎片标签:`<code>o</code> <code>t</code> <code>h</code> <code>e</code> <code>r</code> <code>s</code>`。就这么明晃晃地印在发布出去的 README 里,没有人发现。
+- Camphr 引用的 `spacy` 标签在 `labels:` 块里没定义,但快照的 `labels` 列老实地记下了 `['spacy']`——`history/` 下**全部 208 个**周快照里都有这么一行,一个不落,每周重写一遍。
+- 重名的 `Orbit` 和 `torchrec` 被生成器**静默折叠**了:2025-10-30 的 CSV 里 `Orbit` 只剩 1 行,而且落在 `probabilistics` 类目下。
+
+所以这里真正该记住的不是"缺陷会拖到哪天爆",而是:**没有校验层,这些缺陷不会抛异常,不会让 CI 变红,不会中断任何一次生成。它们只是安安静静地、周复一周地污染已经发布的 README,直到某天有人翻查历史数据、或者盯着某个项目的标签看出了不对劲,才第一次知道它存在。**
+
+失败的形态不是"生成器崩溃",而是"输出是错的,而且没有任何人收到通知"。这恰恰是第 1 节那三种失效模式的另一个版本——代码在跑,指标在涨,事情在做错。唯一的区别是这次的主角不是你的模型,是你的数据。
+
+当天 18:33 的 commit 把 `validate.py` 插进了 CI,放在生成步骤**之前**。从那以后,同类缺陷的暴露时间从"208 周后有人偶然发现"变成"提交时红灯"。**这就是第 4 节那条分工线**:结构性正确性交给机器,判断留给人——而前提是,交给机器的那个机器,得先被审一遍(第 6 分钟那两个校验器自身的 bug 就是例证)。
 
 ## 6. 五条工作原则
 
@@ -91,7 +103,7 @@
 
 **一、定义问题先于选工具。**动手前,用业务语言写出三句话:预测什么、预测的那一刻能拿到什么数据、按预测结果采取的行动是什么。做不到第三句,说明你还没有一个优化问题,只有一个相关性游戏。**检查动作**:把这三句话写进 issue 或 commit message,让半年后的自己能看到当时的判断。
 
-**二、手写一次最小实现。**每个你要用 AI 加速的领域,先自己手写 50–150 行的最小版本,纯 Python 标准库,不加任何库。手写的目的不是取代 AI,而是**建立错误基线**——你必须亲眼见过一个逻辑回归是怎么从 sigmoid 和梯度下降长出来的,才能在 AI 交回来的代码里认出"它少了 L2 正则""它把标签也当成了特征"。**检查动作**:`code/chXX/chXX_minimal.py` 能跑,并打印出你要用来对照的量(权重、混淆矩阵、排序质量)。
+**二、手写一次最小实现。**每个你要用 AI 加速的领域,先自己手写 50–150 行的最小版本,纯 Python 标准库,不加任何库。手写的目的不是取代 AI,而是**建立错误基线**——你必须亲眼见过一个逻辑回归是怎么从 sigmoid 和梯度下降长出来的,才能在 AI 交回来的代码里认出"它少了 L2 正则""它把标签也当成了特征"。**检查动作**:从 ch02 起,每一章的手写实现都放在 `docs/tutorial/code/<章号>/<章号>_minimal.py`,用 `/opt/homebrew/bin/python3` 直接跑通,并打印出你要用来对照的量(权重、混淆矩阵、排序质量)。本章是立场章,没有代码,所以没有这个文件可给你跑。
 
 **三、AI 产出必须过审阅清单,不能过测试。**测试回答"代码是否按写的做",清单回答"这件事是否该这么做"。拿到 AI 产出的第一件事,是打开 [REVIEW-CHECKLISTS.md](../../REVIEW-CHECKLISTS.md) 对应类目那一节,逐条问出答案,并把答案记进 commit 或 PR。**检查动作**:PR 里有一段文字回答了至少一条 "Review before trusting AI code" 的问题;如果没有,那不是 AI 产出被接受了,是它被漏审了。
 
@@ -111,13 +123,24 @@ Part I 的五章是一条闭环,不是五个话题:ch02 泄漏和 ch03 切分是
 
 ## 8. 仓库导航
 
-本章的立场,落到具体类目上,就是这份清单覆盖的 39 个类目。跑一次导入,再用查询 CLI 看看数据:
+先把历史数据导进本地库,再用查询 CLI 看看这份清单到底装着什么:
 
 ```bash
-/opt/homebrew/bin/python3 scripts/import_history.py   # 首次:187,281 行
+/opt/homebrew/bin/python3 scripts/import_history.py   # 首次:187,281 行 / 208 个周快照
 /opt/homebrew/bin/python3 scripts/analyze.py data/history.db recent 5
 ```
 
-第一条把 `history/` 下 208 个周快照导入本地 SQLite(约 6 秒,`data/history.db` 已被 gitignore,用完可随时重建);第二条打印最近加入的项目。Part I 后续各章会按主题给出更具体的查询,例如 `top ml-frameworks 5`、`top time-series-data 5`、`trend Tensorflow`。
+`analyze.py` 的用法是 `analyze.py <db> <cmd> [args...]`,**db 路径是第一个位置参数,不能省**——省了它会把 `top` 当成 db、把 `ml-frameworks` 当成子命令,然后报 `unknown command` 退出 2。Part I 后续各章会按主题给出更具体的查询,都可以照这个完整形式直接复制执行:
 
-立场素材的三个来源,建议按顺序读一遍:`config/header.md` 的 `## How to Use This List in the AI-Coding Era` 一节(四个姿态的原文,README 每次生成时把它嵌在正文之前)、`REVIEW-CHECKLISTS.md` 的引言(为什么要按领域给问题)、以及 `git log` 里 2026-10-03 那几次 commit(机器怎么管机械正确性)。
+```bash
+/opt/homebrew/bin/python3 scripts/analyze.py data/history.db top ml-frameworks 5
+/opt/homebrew/bin/python3 scripts/analyze.py data/history.db top time-series-data 5
+/opt/homebrew/bin/python3 scripts/analyze.py data/history.db top tabular 5
+/opt/homebrew/bin/python3 scripts/analyze.py data/history.db trend Tensorflow
+```
+
+关于"这份清单覆盖多少类目",给你一个能自己核对的说法,而不是一个笼统的数字:`projects.yaml` 里定义了 **39 个**类目,其中 `chinese-nlp` 标了 `ignore: true`,不进入 README 正文,所以**实际渲染 38 个**;此外生成器会在末尾自动追加一个 `## Others` 段,收纳所有没有显式 `category` 的条目(当前 950 个项目里有 45 个),加上显式写 `category: others` 的 21 个,合计 66 个。类目 ID 就是后面查询里要传的那个字符串,可在 `projects.yaml` 的 `categories:` 块里逐个核对。
+
+最后提醒一句,免得你去 README 里找不到东西:上面讲的立场段(第 4 节)和各类目 subtitle 里的 "Gate your review on: ...",目前只存在于 `config/header.md` 和 `projects.yaml` 里(commit `93f52fa`,2026-10-04),**要等下一次定时生成才会出现在 README.md 中**——现在 `grep 'AI-Coding Era' README.md` 的结果是 0,因为当前 README 还是 2025-10-30 那次生成的产物。改配置类文件之后,渲染是异步的,这一点和第 5 节讲的延迟是同一回事。
+
+立场素材的三个来源,建议按顺序读一遍:`config/header.md` 的 `## How to Use This List in the AI-Coding Era` 一节(四个姿态的原文)、`projects.yaml` 的 `categories:` 块(每个类目那句 "Gate your review on: ...")、`REVIEW-CHECKLISTS.md` 的引言(为什么要按领域给问题),以及 `git log` 里 2026-10-03 那几次 commit(机器怎么管机械正确性)。
