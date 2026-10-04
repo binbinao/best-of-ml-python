@@ -16,7 +16,17 @@ AI 写代码的时代,你的价值是定义业务问题、理解原理门槛、�
 | [ch04](ch04-metrics.md) | 指标 | 预测与优化问题 | ml-frameworks |
 | [ch05](ch05-tabular-modeling.md) | 表格建模全景 | 预测与优化问题 | tabular, ml-frameworks |
 
-Part II(数据与领域)、Part III(LLM 时代)、Part IV(可信与规模)待续。
+**Part I 状态**:已完成并通过逐章审查(44 项发现全部处置),详见 [PART1-REVIEW.md](PART1-REVIEW.md)。
+
+Part II(数据与领域:时序 / 文本 / 图像 / 特征工程与管道)、Part III(LLM 时代)、Part IV(可信与规模)待续。
+
+## 每章检查动作
+
+读完每章,先别急着认可代码——带着这三个问题回看本章的 AI 工程版:
+
+1. **这个数字回表核对过吗?** ch04 教过:FP 列 1183 不是总拒绝数(是 1419);ch05 教过:0.6145 vs 0.6145 相减不是 0.0019。
+2. **这个方向验证过吗?** ch04 教过:`ORDER BY projectrank DESC` 里 44→56 是上升不是下降;ch05 教过:`gap=1` 的单位是样本数不是月份。
+3. **这是构造的还是测出来的?** ch02 的近泄漏字段、ch03 的 0.5000 恒等式、ch04 的 1:1 成本口径、ch05 的 partner_channel——每一个都曾被当成实证发现,实际上都是人为设定。
 
 ## 环境准备
 
