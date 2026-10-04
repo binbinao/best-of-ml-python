@@ -35,7 +35,11 @@ train_test_split(df, test_size=0.2, random_state=42)
 /opt/homebrew/bin/python3 docs/tutorial/code/ch03/splits_minimal.py
 ```
 
-[splits_minimal.py](code/ch03/splits_minimal.py) 是纯标准库实现,只有 `math`、`random`、`sys`、`time` 四个 import——三个切分函数、两个估计器、AUC(秩和公式)全部手写。1200 行数据,跑完 0.8 秒。
+[splits_minimal.py](code/ch03/splits_minimal.py) 是纯标准库实现,只有 `math`、`random`、`sys`、`time` 四个 import——三个切分函数、两个估计器、AUC(秩和公式)全部手写。1200 行数据,跑完约 **4.2 秒**。
+
+**这 4.2 秒几乎全部花在验证上,不是花在切分上。** 四个切分的诊断、训练与评估加起来不到半秒;剩下的 3.75 秒全部是结论里的 30 组种子重采样——每组种子都要把 random 和 group 两种切分各训练一次(两次梯度下降,每次 60 轮)。
+
+这个比例本身是个教学点:**多种子验证比单次运行贵一个数量级。** 你日常跑一个训练脚本、看到指标、关掉,那是第一档,不到半秒;而本章要回答的是"这个 0.04 的差异是信号还是噪声",那需要把整套流程重跑 30 遍。**审阅者应当预期这一档成本,并在报告里为它留出预算**——否则最后会退回到拿单次运行的数字下结论,也就是第 4 节要反对的那件事。
 
 数据集是构造的"设备故障预测",两层 group 结构加一条时间轴:
 
