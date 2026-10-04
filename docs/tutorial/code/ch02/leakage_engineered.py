@@ -136,7 +136,9 @@ def fit_transform_scale_scaler(X):
     StandardScaler 在这里 fit 了**全量 X**,包含后面要被当作测试集的那 20%。
     训练阶段因此知道了测试集的均值和标准差。
 
-    返回 (变换后的矩阵, 那个被污染的 scaler),后者留给正文第 3 节做对照。
+    返回 (变换后的矩阵, 那个被污染的 scaler)。后者保留下来,供下面
+    main() 里把它和"仅训练集 fit"的那份做逐项对照 —— 这正是正文第 3 节
+    讲的那两处破坏的证据来源。
     """
     scaler = StandardScaler()
     return scaler.fit_transform(X), scaler
@@ -218,8 +220,10 @@ def main():
           % (len(y), len(ALL_FEATURES), 100.0 * float(y.mean())))
     print()
 
-    # 切分只做一次,两条路径共用同一批训练/测试行 —— 否则两个 AUC
-    # 是在不同的测试集上算的,连"只差 fit 时机"这个前提都不成立。
+    # 切分只做一次,两条路径共用同一批训练/测试行。
+    # (shuffle=False + 固定种子下两次独立切分本来也会落在同一批行上,
+    #  但共用一次切分让"只差 fit 时机"这个对照前提在代码里显式成立,
+    #  也省掉一次重复切分。)
     all_idx = np.arange(len(y))
     train_idx, test_idx = train_test_split(
         all_idx, test_size=TEST_SIZE, shuffle=False, random_state=SEED
@@ -230,8 +234,7 @@ def main():
     # ---- 路径 1:原始产出。标准化在切分之前 fit 了全量数据 ----
     # 先对**全量**X 标准化,再取已经切好的那批行 —— 这就是"先 fit 后切分"
     # 写进代码里的样子:切分逻辑没变,只是喂给它的数据已经带着测试集信息。
-    full_scaler = StandardScaler()
-    X_all_scaled = full_scaler.fit_transform(X)      # ← 泄漏发生在这里
+    X_all_scaled, full_scaler = fit_transform_scale_scaler(X)   # ← 泄漏在这里
     X_train_l = X_all_scaled[train_idx]
     X_test_l = X_all_scaled[test_idx]
     pipe_leaky = fit_pipeline(X_train_l, y_train)

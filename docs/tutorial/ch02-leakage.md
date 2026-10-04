@@ -92,7 +92,17 @@ else:
 
 近泄漏不需要长得像答案,它只需要在**答案发生之后**才被确定。`snapshot_tenure_current_value` 满足这个条件:客户流失之后,他们的 tenure 就此定格;而一个还留着的客户,tenure 还在正常增长。这个字段和标签相关性强,但它在预测时点上根本不存在——那一刻你只能看到上个月的 tenure。
 
-模型 C 的权重表里,`snapshot_tenure_current_value` 拿走了 `-1.0572`,压过全部三个真实特征加起来。
+模型 C 的权重表里,`snapshot_tenure_current_value` 拿走了 `-1.8747`,压过全部三个真实特征加起来(`0.5576`):
+
+```
+  特征                                         权重     |权重|排名
+  --------------------------------------------------------
+  snapshot_tenure_current_value         -1.8747          1  <- 泄漏
+  plan_tier                              0.4346          2
+  age                                    0.0852          3
+  usage_score                            0.0378          4
+  泄漏 |w| 合计 1.8747 / 真实 |w| 合计 0.5576 = 3.4x
+```
 
 先说清楚一件事:**近泄漏会让指标变形**,C 的 0.9881 就比 B 的 0.6767 高得多。它只是不像标签副本那样顶到 1.0。别把"指标没有完全爆表"当成安全信号。
 
@@ -127,8 +137,7 @@ else:
 
 ```python
 # 原始产出:先对全量 X(含测试集)标准化,再取切好的那批行
-full_scaler = StandardScaler()
-X_all_scaled = full_scaler.fit_transform(X)      # ← 泄漏发生在这里
+X_all_scaled, full_scaler = fit_transform_scale_scaler(X)   # ← 泄漏在这里
 X_train_l = X_all_scaled[train_idx]
 X_test_l  = X_all_scaled[test_idx]
 ```
