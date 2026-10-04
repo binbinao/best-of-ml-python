@@ -11,8 +11,10 @@
   (b) cancelled_is_label_copy          —— 目标泄漏(标签副本)
       标签本身换了列名。教科书级的泄漏,也是唯一能把 AUC 顶到 1.0 的那种。
   (c) snapshot_tenure_current_value    —— 近泄漏(时点错配)
-      用了"当前"tenure 而不是快照时刻的 tenure。与标签强相关,
-      但这个值在流失发生之后才最终确定,预测时点拿不到。
+      用了"当前"tenure 而不是快照时刻的 tenure。流失客户的 tenure 区间
+      与留存客户**有意重叠**,所以它是强相关而非确定性的标签函数
+      (单列 AUC ≈ 0.985)。但它在流失发生之后才最终确定,预测时点拿不到
+      —— 这一点和它有多相关无关。
 
 真实弱信号(预测时点确实拿得到):
   (d) age, plan_tier, usage_score
@@ -65,7 +67,7 @@ def make_dataset(n=N_SAMPLES, seed=SEED):
     行按快照日期升序(生成顺序即时间顺序),供后面的时序切分使用。
 
     真实信号来自线性打分:
-        logit = -2.6 + 0.020*(age-40) + 0.85*(plan_tier-1) + 0.45*usage_score
+        logit = -2.6 + 0.012*(age-40) + 0.60*(plan_tier-1) + 0.30*usage_score
     系数刻意调小,让"只用真实特征"的 AUC 落在 0.6-0.7 这个现实区间。
     """
     rng = random.Random(seed)
@@ -93,10 +95,13 @@ def make_dataset(n=N_SAMPLES, seed=SEED):
         label_copy = cancelled
 
         # (c) 近泄漏:用了当前 tenure 而非快照时 tenure。
-        #     刚流失的客户 tenure 普遍更短,与标签相关,但不是确定关系,
-        #     也完全不可用于预测时点。
+        #     刚流失的客户 tenure 普遍更短 —— 但两个区间**故意重叠**在
+        #     [24.0, 30.0],所以这一列是强相关而非确定性的标签函数:
+        #     单列 AUC 约 0.985,不是 1.0。它之所以仍然是泄漏,原因与
+        #     相关性高低无关 —— 这个值在流失发生之后才最终确定,
+        #     预测那一刻根本拿不到。
         if cancelled:
-            tenure_now = rng.uniform(0.5, 22.0)
+            tenure_now = rng.uniform(0.5, 30.0)
         else:
             tenure_now = rng.uniform(24.0, 55.0)
 
@@ -356,12 +361,38 @@ def main():
     print()
     print("更值得看的是 C。特征表里只有三个正常字段加一个 tenure,")
     print("没有任何一列长得像标签,没有任何一列叫 cancelled。")
-    print("AUC 却从 %.4f 一步跳到 %.4f —— 近泄漏就是这样:"
+    print("AUC 从 %.4f 跳到 %.4f —— 近泄漏就是这样:"
           % (auc_real, auc_near))
     print("它不需要长得像答案,只需要在流失发生之后才被确定。")
     print()
+    print("注意 C 的 %.4f 确实**变形了** —— 近泄漏会推高指标,只是不像"
+          % auc_near)
+    print("标签副本那样顶到 1.0。别把\"指标没完全爆表\"当成安全信号。")
+    print()
     print("还要注意:测试集里同样带着这些列,所以模型 A 的测试 AUC 也一样漂亮。")
     print("换一份测试集救不了你 —— 那还是同一种泄漏。")
+    print()
+
+    print("-" * 74)
+    print("第 2b 段  每一列**单独**的判别力")
+    print("-" * 74)
+    print("只看模型分不清谁在作弊,看单列 AUC 才知道每一列有多强。")
+    print("单列 AUC = 直接拿这一列的原始值当分数算 AUC,方向取绝对值。")
+    print()
+    print("  %-34s %12s" % ("特征", "单列 AUC"))
+    print("  " + "-" * 48)
+    single_auc = {}
+    for j, name in enumerate(ALL_FEATURES):
+        raw = roc_auc(y_test, [row[j] for row in X_test])
+        col_auc = max(raw, 1.0 - raw)  # 取绝对方向:低 tenure 意味着高流失
+        single_auc[name] = col_auc
+        marker = "  <- 泄漏" if name in LEAKAGE_FEATURES else ""
+        print("  %-34s %12.4f%s" % (name, col_auc, marker))
+    print()
+    print("近泄漏那一列的单列 AUC 是 %.4f —— 它不是标签的完美复制,"
+          % single_auc["snapshot_tenure_current_value"])
+    print("却强到足以主导整个模型。**是否泄漏,取决于预测时点,**")
+    print("**不取决于它有多相关。**")
     print()
 
     print("-" * 74)
@@ -401,7 +432,9 @@ def main():
     print("AUC %.4f 是泄漏字段在报数,不是模型在预测。" % auc_all)
     print("判断方法只有一个,没有任何工具能替你做:逐字段问 ——")
     print("做预测的那一刻,这个值拿得到吗?拿不到的字段,无论 AUC 多高都要划掉。")
-    print("而模型 B 的 %.4f 才是这份数据真正的上限。" % auc_real)
+    print("模型 B 的 %.4f 是这份数据上真实特征能达到的水平;" % auc_real)
+    print("它还不是理论上限 —— 换更灵活的模型大概能到 0.69 左右。")
+    print("但这不重要:能拿去和业务讨论的,永远只有这个量级的数字。")
     print()
     print("全部训练与评估耗时 %.2f 秒(3 个逻辑回归,纯 Python,无任何第三方库)。"
           % (time.time() - started))

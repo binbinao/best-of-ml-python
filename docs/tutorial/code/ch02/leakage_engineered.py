@@ -3,40 +3,44 @@
 
 生成记录: 2026-10-03,提示词摘要="写一个客户流失预测的 sklearn 管线,含标准化、
 逻辑回归、ROC-AUC 评估"
-审阅发现: 原始产出在切分前对全量数据 fit 了 StandardScaler(泄漏),已改为在
-Pipeline 内先切分后 fit。
+审阅发现: 原始产出在切分前对全量数据 fit 了 StandardScaler(泄漏)。
 
-—— 上面那段是本书的叙事。下面是本章的真实文件:它保留一处**故意留下**的陷阱,
-供正文第 3 节与第 4 节逐行对照。
+—— 注意:审阅发现**已记录,但未修复**。下面这份就是"记录了问题、修复没落地"
+的真实形态,故意保留陷阱,供正文第 3 节与第 4 节逐行对照。修好的版本并排放
+在 fit_pipeline_correct() 里。
 
     ⚠️  审阅发现(本文件实际状态,2026-10-04)
     ⚠️
-    ⚠️  本文件**没有**完全修好。原始 AI 产出在 fit_transform_scale_scaler()
-    ⚠️  里对全量数据 fit 了 StandardScaler;审阅者发现并记录了这个问题,
-    ⚠️  但 fit_pipeline() 仍照原样使用这份已污染的矩阵。
+    ⚠️  本文件**没有**修好。原始 AI 产出对全量数据 fit 了 StandardScaler;
+    ⚠️  审阅者发现并记录了这个问题,但 main() 里的路径 1 仍照原样使用
+    ⚠️  这份已污染的矩阵。
     ⚠️
     ⚠️  先说清楚这件事最反直觉的地方,因为它比"泄漏"本身更值得记住:
     ⚠️
-    ⚠️  **这处泄漏不会让测试 AUC 变高。** 本文件跑出来路径 1 与路径 2
-    ⚠️  的 AUC 完全相同(1.0000),真实特征下也逐位相同(0.6501)。
-    ⚠️  原因在 AUC 的定义:它是纯排序指标,只关心"谁排在谁前面",
-    ⚠️  对特征整体缩放完全不敏感。sklearn 的版本差异同样只有小数点后
-    ⚠️  第三位(0.2319 vs 0.2299)。
+    ⚠️  **测试 AUC 不会动。** 路径 1 与路径 2 的 AUC 逐位相同(1.0000)。
+    ⚠️  但别把它读成"所以这处泄漏无害",下面两行是实测:
     ⚠️
-    ⚠️  所以"盯着指标看"这个习惯,在这一类泄漏上彻底失效。你不会因为
-    ⚠️  分数不对而发现它 —— 分数根本不会不对。真正被污染的是另外两件事:
+    ⚠️      分数最大改动  max |Δp| = 5.21e-04
+    ⚠️      排序改变的行  63 / 400 (15.8%)
+    ⚠️
+    ⚠️  模型确实变了,只是扰动小到没能让任何一对正负样本换序。AUC 保持
+    ⚠️  沉默是**这个数据集、这个测试集占比下的巧合**,不是规律 ——
+    ⚠️  扰动再大一点,换序就会发生。这正是 REVIEW-CHECKLISTS.md 那条
+    ⚠️  "Is the same preprocessing applied identically at train and
+    ⚠️  inference time?" 要抓的东西。
+    ⚠️
+    ⚠️  真正被破坏的是另外两件事:
     ⚠️
     ⚠️  1) 存下来的模型工件里嵌入了测试集统计量。pickle 出去的
     ⚠️     StandardScaler.mean_ 含 20% 测试数据,你的"训练产物"从定义上
     ⚠️     就不再是纯训练产物。
-    ⚠️  2) L2 正则在错误的坐标系里生效。sklearn 的 C=1.0 是作用在
-    ⚠️     标准化后的空间上;fit 全量数据时每个特征拿到的缩放系数变了,
-    ⚠️     等于给不同特征施加了不同的正则强度。
+    ⚠️  2) L2 正则在错误的坐标系里生效。sklearn 的 C=1.0 作用在标准化后
+    ⚠️     的空间上;全量 fit 改变了每个特征各自的仿射系数,等于给不同
+    ⚠️     特征施加了不同的正则强度 —— 同一份数据、两条路径下 age 系数
+    ⚠️     0.1052 vs 0.1037(+1.41%),测试 AUC 却都是 1.0000。
     ⚠️
-    ⚠️  真正的风险在下游:线上换一个批次重新 fit 标准化器,或数据分布
-    ⚠️  随时间漂移,这个模型就对不上了,而你在离线指标上永远看不到信号。
-    ⚠️  这正是 REVIEW-CHECKLISTS.md 那条 "Is the same preprocessing
-    ⚠️  applied identically at train and inference time?" 要抓的东西。
+    ⚠️  风险在下游:线上换一个批次重新 fit 标准化器,或数据分布随时间漂移,
+    ⚠️  这个模型就对不上了,而离线指标看不到任何信号。
     ⚠️
     ⚠️  正确写法在 fit_pipeline_correct() 里:把 StandardScaler 放进
     ⚠️  Pipeline,fit 就只会作用在训练集上。两个函数并排放着,差异无处可藏。
@@ -102,9 +106,11 @@ def make_dataset(n=N_SAMPLES, seed=SEED):
     label_copy = cancelled.astype(float)
 
     # (c) 近泄漏:用了当前 tenure 而非快照时刻的 tenure。
+    #     两个区间**故意重叠**在 [24.0, 30.0],所以这是强相关而非确定性的
+    #     标签函数(单列 AUC ≈ 0.99),和 leakage_minimal.py 完全一致。
     tenure_now = np.where(
         cancelled == 1,
-        rng.uniform(0.5, 22.0, size=n),
+        rng.uniform(0.5, 30.0, size=n),
         rng.uniform(24.0, 55.0, size=n),
     ).round(3)
 
@@ -136,7 +142,7 @@ def fit_transform_scale_scaler(X):
     return scaler.fit_transform(X), scaler
 
 
-def fit_pipeline(X_train, y_train, features):
+def fit_pipeline(X_train, y_train):
     """原始产出的结构:scaler 已经在外面 fit 过了,这里只管训练逻辑回归。"""
     pipe = Pipeline(
         [
@@ -212,27 +218,35 @@ def main():
           % (len(y), len(ALL_FEATURES), 100.0 * float(y.mean())))
     print()
 
-    # ---- 路径 1:原始产出。标准化在切分之前 fit 了全量数据 ----
-    X_scaled, full_scaler = fit_transform_scale_scaler(X)   # ← 泄漏发生在这里
-    X_train_l, X_test_l, y_train_l, y_test_l = train_test_split(
-        X_scaled, y, test_size=TEST_SIZE, shuffle=False, random_state=SEED
+    # 切分只做一次,两条路径共用同一批训练/测试行 —— 否则两个 AUC
+    # 是在不同的测试集上算的,连"只差 fit 时机"这个前提都不成立。
+    all_idx = np.arange(len(y))
+    train_idx, test_idx = train_test_split(
+        all_idx, test_size=TEST_SIZE, shuffle=False, random_state=SEED
     )
-    pipe_leaky = fit_pipeline(X_train_l, y_train_l, ALL_FEATURES)
-    auc_leaky = roc_auc_score(y_test_l, pipe_leaky.predict_proba(X_test_l)[:, 1])
+    X_train, X_test = X[train_idx], X[test_idx]
+    y_train, y_test = y[train_idx], y[test_idx]
+
+    # ---- 路径 1:原始产出。标准化在切分之前 fit 了全量数据 ----
+    # 先对**全量**X 标准化,再取已经切好的那批行 —— 这就是"先 fit 后切分"
+    # 写进代码里的样子:切分逻辑没变,只是喂给它的数据已经带着测试集信息。
+    full_scaler = StandardScaler()
+    X_all_scaled = full_scaler.fit_transform(X)      # ← 泄漏发生在这里
+    X_train_l = X_all_scaled[train_idx]
+    X_test_l = X_all_scaled[test_idx]
+    pipe_leaky = fit_pipeline(X_train_l, y_train)
+    auc_leaky = roc_auc_score(y_test, pipe_leaky.predict_proba(X_test_l)[:, 1])
 
     # ---- 路径 2:修好之后。标准化只在 Pipeline 内对训练集 fit ----
-    X_train_c, X_test_c, y_train_c, y_test_c = train_test_split(
-        X, y, test_size=TEST_SIZE, shuffle=False, random_state=SEED
-    )
-    pipe_clean = fit_pipeline_correct(X_train_c, y_train_c)
-    auc_clean = roc_auc_score(y_test_c, pipe_clean.predict_proba(X_test_c)[:, 1])
+    pipe_clean = fit_pipeline_correct(X_train, y_train)
+    auc_clean = roc_auc_score(y_test, pipe_clean.predict_proba(X_test)[:, 1])
     train_scaler = pipe_clean.named_steps["scaler"]
 
     # ---- 路径 3:彻底剔除泄漏字段,只用真实信号 ----
     real_idx = [ALL_FEATURES.index(name) for name in REAL_FEATURES]
-    pipe_real = fit_pipeline_correct(X_train_c[:, real_idx], y_train_c)
+    pipe_real = fit_pipeline_correct(X_train[:, real_idx], y_train)
     auc_real = roc_auc_score(
-        y_test_c, pipe_real.predict_proba(X_test_c[:, real_idx])[:, 1]
+        y_test, pipe_real.predict_proba(X_test[:, real_idx])[:, 1]
     )
 
     print("-" * 74)
@@ -242,15 +256,33 @@ def main():
     print("路径 2  Pipeline 内先切分后 fit(已修正)       : AUC = %.4f" % auc_clean)
     print("路径 3  剔除全部泄漏字段,只用真实特征        : AUC = %.4f" % auc_real)
     print()
-    print("路径 1 与路径 2 的数据、切分方式、随机种子完全相同,只差")
-    print("StandardScaler fit 的时机。你会发现两条路径的 AUC **完全一样**")
-    print("(真实特征下也逐位相同)。")
+    print("路径 1 与路径 2 用的是**同一批**训练/测试行、同一个随机种子,")
+    print("只差 StandardScaler fit 的时机。两条路径的 AUC 完全相同。")
     print()
-    print("这不是 bug,这是本章最反直觉的一课:")
+    print("但分数并没有相同 —— 这才是这件事需要小心的地方:")
     print()
-    print("  AUC 是纯排序指标,只关心谁排在谁前面,对特征整体缩放不敏感。")
-    print("  所以“先标准化再切分”这种泄漏 **不会** 在 AUC 上留下任何痕迹。")
-    print("  你不可能靠“分数不对”发现它 —— 分数根本不会不对。")
+    pred_leaky = pipe_leaky.predict_proba(X_test_l)[:, 1]
+    pred_clean = pipe_clean.predict_proba(X_test)[:, 1]
+    delta = np.abs(pred_leaky - pred_clean)
+    rank_changed = int((np.argsort(np.argsort(pred_leaky))
+                        != np.argsort(np.argsort(pred_clean))).sum())
+    print("  分数最大改动      max |Δp| = %.2e" % delta.max())
+    print("  排序发生变化的行   %d / %d (%.1f%%)"
+          % (rank_changed, len(pred_leaky), 100.0 * rank_changed / len(pred_leaky)))
+    print("  AUC               %.10f vs %.10f(逐位相同)"
+          % (auc_leaky, auc_clean))
+    print()
+    print("模型确实变了,只是这个扰动小到没能让任何一对正负样本换序,")
+    print("所以 AUC 这一个指标选择性地保持了沉默。")
+    print()
+    print("这里要说准确:AUC 对**分数的仿射缩放**不敏感(整体乘 c 不改变排序),")
+    print("但全量 fit 并不是整体乘一个常数 —— 它改变的是每个特征各自的仿射")
+    print("系数,于是 L2 的作用点也跟着变(见下面第 2 点)。学到的函数变了,")
+    print("AUC 没变。这是这个数据集、这个测试集占比下的巧合,不是规律:")
+    print("扰动再大一点,换序就会发生,AUC 就会动。")
+    print()
+    print("所以正确的结论不是\"这处泄漏不影响指标\",而是:")
+    print("**别依赖指标替你发现泄漏。** 问的是代码结构 —— fit 发生在哪一步。")
     print()
     print("那它到底破坏了什么?两处可验证的东西:")
     print()
@@ -258,7 +290,7 @@ def main():
     print("     全量 fit 出来的 mean_ : %s" % np.round(full_scaler.mean_, 4))
     print("     仅训练集 fit 的 mean_ : %s" % np.round(train_scaler.mean_, 4))
     print("     存下去的 StandardScaler 里,有 %d%% 的样本根本属于测试集。"
-          % int(round(100.0 * len(X_test_c) / len(X))))
+          % int(round(100.0 * len(X_test) / len(X))))
     print("     你的“训练产物”从定义上就不再是纯训练产物。")
     print()
     print("  2) L2 正则在错误的坐标系里生效")
@@ -298,9 +330,11 @@ def main():
     print("=" * 74)
     print("三个数字的读法:")
     print("  %.4f  泄漏特征在报数,不是模型在预测。" % auc_clean)
-    print("  %.4f  这份数据真正的上限。" % auc_real)
-    print("  路径 1 与路径 2 相差 0 —— 标准化泄漏不会动 AUC,")
-    print("         所以它只能靠读代码发现,不能靠看指标发现。")
+    print("  %.4f  真实特征能达到的水平(不是理论上限,大概还能到 0.69)。" % auc_real)
+    print("  路径 1 与路径 2 的 AUC 相差 0,但分数最大改动 %.1e ——"
+          % delta.max())
+    print("         分数变了、排序变了,只是没到让 AUC 变动的程度。")
+    print("         所以这处泄漏只能靠读代码发现,不能靠看指标发现。")
     print("全部训练与评估耗时 %.2f 秒(3 条 sklearn 管线)。" % (time.time() - started))
 
 
