@@ -30,6 +30,7 @@ flowchart LR
 | `.github/` | `workflows/update-best-of-list.yml`, `ISSUE_TEMPLATE/`, `PULL_REQUEST_TEMPLATE.md` |
 | `scripts/` | `validate.py` (projects.yaml checks — also the CI gate), `import_history.py` (history CSVs → SQLite), `analyze.py` (query CLI) |
 | `tests/` | pytest suite for the scripts: `test_validate.py`, `test_history.py` |
+| `docs/tutorial/` | 教程正文与可运行示例(chXX 代码目录,验收:`python code/chXX/chXX_minimal.py`) |
 | `data/` | Gitignored local artifact: `history.db`, rebuilt on demand via `import_history.py` |
 | `README.md`, `latest-changes.md` | Generated output — never hand-edit |
 

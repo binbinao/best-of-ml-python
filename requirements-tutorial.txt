@@ -1,0 +1,12 @@
+# 教程代码依赖(Part I 及以后)
+#
+# 安装:
+#   /opt/homebrew/bin/python3 -m pip install -r requirements-tutorial.txt
+#
+# 用途:docs/tutorial/code/ 下各章的「AI 工程版」示例需要。
+# 手写实现(leakage_minimal.py 等)只用标准库,无需安装任何东西。
+#
+# 验证环境:Python 3.14.8 (Homebrew), scikit-learn 1.9.1, numpy 2.5.3
+
+scikit-learn>=1.5
+numpy>=1.26
