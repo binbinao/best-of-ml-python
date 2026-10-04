@@ -62,12 +62,34 @@ from sklearn.preprocessing import StandardScaler
 # 数据生成与切分从 minimal 版原样导入,保证两份代码的数字可以直接对照
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from tabular_minimal import (  # noqa: E402
-    FEATURES, FIT_END_MONTH, SEED, VALID_END_MONTH,
+    FEATURES, FIT_END_MONTH, N_CUSTOMERS, SEED, VALID_END_MONTH,
     lift_at_fraction, make_dataset, roc_auc_rank_sum, roc_auc_trapezoid,
     split_by_month, to_matrix,
 )
 
 C_GRID = (0.01, 0.1, 1.0, 10.0)
+
+# 四种 CV 对照用**同一个折数**,否则 5 折的均值和 3 折的均值不是同一个
+# 估计量,四行放在一起比较就不严谨了。原始产出是 5 折,所以另外三个也用 5 折。
+N_SPLITS = 5
+
+# 月份重叠占比的种子敏感性:那个 83.3% 是**单种子**的数,方向确定、幅度不
+# 确定,所以要跑几组种子把两件事分开报。
+SEED_SENSITIVITY_N = 5
+
+# ⚠️ TimeSeriesSplit 的 gap 单位是**样本数**,不是月份。sklearn docstring:
+#    "Number of samples to exclude from the end of each train set before
+#     starting the test set."
+# 本数据每月 300 行 —— 所以 `gap=1` 只排 1 行,实测毫无改善:
+#    gap=0 -> [150,0,150]  gap=1 -> [150,0,150]  gap=300 -> [0,0,0]
+# 这是本章最讽刺的一处:正文原本教 gap=1,而它在这份数据上等于没设。
+# 还必须显式给 test_size —— 5 折 + test_size=300 + gap=300 恰好需要
+# 5*300+300 = 1800 行,等于全部可用行,sklearn 直接报
+# "Too many splits=5 for number of samples=1800"。把 test_size 收到 240
+# (0.8 个月)才排得下,而这正是"设了 gap 还得配得上采样预算"的现实。
+GAP_ROWS = 300          # = 1 个月
+TS_TEST_SIZE = 240      # = 0.8 个月,让 5 折 + gap 在 1800 行里排得下
+ROWS_PER_MONTH = N_CUSTOMERS  # 每个客户每月一行,所以每月行数 = 客户数
 
 
 def make_pipeline(c=1.0):
@@ -91,8 +113,9 @@ def cv_5(X, y):
     `shuffle=False`**(签名 `(self, n_splits=5, *, shuffle=False,
     random_state=None)`)——**所以它并不打乱**。
 
-    这一点很要紧,因为"默认随机切分"是一个流传很广的误解,本章一开始也
-    写错了(见 fix_ 下的实测)。真实的失效形态是另一个,而且更隐蔽:
+    这一点很要紧,因为"默认随机切分"是一个流传很广的误解,本章初稿也照抄
+    过(已由 `inspect.signature` 实测推翻,见文件头的生成记录)。真实的失效
+    形态是另一个,而且更隐蔽:
 
     `shuffle=False` + 数据本来就按月份排序 ⇒ 每一折的训练侧**都包含全部
     6 个月**,验证侧是其中 2–3 个月的**子集**。于是:
@@ -101,27 +124,44 @@ def cv_5(X, y):
       - 83.3% 的验证行,其所属月份在训练侧也出现过(这是时间线重叠)。
 
     比随机切分更难发现,因为它**每一折都"用满了全部数据"**,看上去很勤勉。
+    本章第 1 段的折结构表把这两条逐折打了出来 —— 数字是数出来的,不是推的。
     """
     return cross_val_score(make_pipeline(), X, y, cv=5, scoring="roc_auc")
 
 
-def time_cv(X, y, n_splits=3):
-    """正确做法之一:TimeSeriesSplit —— 训练永远在验证之前,不给未来行。"""
-    return cross_val_score(make_pipeline(), X, y, cv=TimeSeriesSplit(n_splits=n_splits),
+def time_cv(X, y, n_splits=N_SPLITS):
+    """正确做法之一:TimeSeriesSplit —— 训练永远在验证之前,不给未来行。
+
+    ⚠️ **gap 的单位是"样本数",不是"月份"**。sklearn docstring 写的是
+    "Number of samples to exclude from the end of each train set"。本数据
+    每月 300 行,所以 `gap=1` 只排掉 1 行,**等于什么都没排**:
+
+        gap=0   -> 验证行月份重叠 [150,   0, 150]
+        gap=1   -> 验证行月份重叠 [150,   0, 150]   ← 没有改善
+        gap=300 -> 验证行月份重叠 [  0,   0,   0]   ← 排掉整整一个月
+
+    这就是本章反复警告的那个失效形态,只不过这次发生在**正确切分的 API
+    上**:设了 gap、代码读起来没问题、实际一行都没排。**"参数设了"不等于
+    "排对了"**,要去看它在这份数据上排掉了多少行。
+    """
+    return cross_val_score(make_pipeline(), X, y,
+                           cv=TimeSeriesSplit(n_splits=n_splits,
+                                              test_size=TS_TEST_SIZE,
+                                              gap=GAP_ROWS),
                            scoring="roc_auc")
 
 
-def group_cv(X, y, groups, n_splits=3):
+def group_cv(X, y, groups, n_splits=N_SPLITS):
     """正确做法之二:GroupKFold —— 同一个客户的 12 行永不跨折。"""
     return cross_val_score(make_pipeline(), X, y, groups=groups,
                            cv=GroupKFold(n_splits=n_splits), scoring="roc_auc")
 
 
-def stratified_group_cv(X, y, groups, n_splits=3):
+def stratified_group_cv(X, y, groups, n_splits=N_SPLITS):
     """正确做法之三:StratifiedGroupKFold —— 时间方向 + 客户边界 + 折间均衡。
 
-    sklearn 1.6+ 才有这个类。它同时满足正负比例在折间大致均衡,**并且**
-    不让同一客户跨折。前面两条各自解决一个问题,这一条一起解决。
+    它同时满足正负比例在折间大致均衡,**并且**不让同一客户跨折。前面两条
+    各自解决一个问题,这一条一起解决。
     """
     return cross_val_score(make_pipeline(), X, y, groups=groups,
                            cv=StratifiedGroupKFold(n_splits=n_splits),
@@ -152,7 +192,8 @@ def main():
     # ======================================================================
     # 第 1 段:原始产出的 CV 跑一遍,并把它和三种正确切分并排放
     # ======================================================================
-    print("=== 1. CV 策略对照(同一份数据、同一套 Pipeline、同一组折数)===")
+    print("=== 1. CV 策略对照(同一份数据、同一套 Pipeline、同一折数 %d)==="
+          % N_SPLITS)
     print("  拟合段:月份 0..%d,%d 行,%d 个客户" % (FIT_END_MONTH - 1,
                                                    len(X_fit),
                                                    len(set(groups))))
@@ -220,30 +261,86 @@ def main():
     print("    合计 %.1f%% 的验证行,其所属月份在训练侧也出现过"
           % (100.0 * tot_month_overlap / tot_val))
     print("    客户重叠五折全部 100% —— 面板数据的结构性事实。")
+    print("    ⚠️ 判据的方向别搞反:**该问的是「是不是 0」。**")
+    print("       默认 5 折实测 100%(问题),GroupKFold / StratifiedGroupKFold")
+    print("       实测五折全部 0%(正常)。看到 0 不该追问,看到非 0 才该。")
     print("    ⚠️ 关键:shuffle=False + 数据按月排序 ⇒ **每折训练侧都含全部 6 个月**,"
           "\n       验证侧是其中 2–3 个月的子集。")
     print("       所以它既不是'随机打散'(常见的误解),也不是'时间在前'(更糟,"
           "\n       因为训练侧看到了验证侧的全部月份)。两种折法它都不满足。")
 
-    tscv = TimeSeriesSplit(n_splits=3)
-    t_overlaps = []
-    t_month_ov = []
-    t_sizes = []
+    # 种子的敏感性:83.3% 这个数是**单种子**的,方向是确定的,幅度不是。
+    # 5 组种子各算一次同样的月份重叠占比,把两件事分开报。
+    print("\n    月份重叠占比的种子敏感性(%d 组):" % SEED_SENSITIVITY_N)
+    pcts, cust_pcts = [], []
+    for k in range(SEED_SENSITIVITY_N):
+        sub_rows = make_dataset(seed=SEED + 1000 * (k + 1))
+        sub_fit, _, _ = split_by_month(sub_rows)
+        Xs, ys = to_matrix(sub_fit)
+        ms = np.array([r["month"] for r in sub_fit])
+        gs = np.array([r["customer_id"] for r in sub_fit])
+        skf_s = StratifiedKFold(n_splits=N_SPLITS)
+        mo = co = tv = 0
+        for tr_idx, te_idx in skf_s.split(Xs, ys):
+            trm = set(ms[tr_idx].tolist())
+            mo += sum(1 for i in te_idx if ms[i] in trm)
+            tv += len(te_idx)
+            co += 100.0 * len(set(gs[te_idx].tolist())
+                              & set(gs[tr_idx].tolist())) / len(set(gs[te_idx].tolist()))
+        pcts.append(100.0 * mo / tv)
+        cust_pcts.append(co / N_SPLITS)
+    print("      月份重叠占比 %s"
+          % " ".join("%.1f%%" % v for v in pcts))
+    print("      客户重叠占比 %s"
+          % " ".join("%.1f%%" % v for v in cust_pcts))
+    print("      -> 客户重叠**每组都是 100%**(0/1 级,无波动)。")
+    print("      -> 月份重叠在 %.1f%%–%.1f%% 之间,取决于该种子的行序,"
+          % (min(pcts), max(pcts)))
+    print("         所以**方向是确定的(远大于 0),幅度不是**,别把 83.3% 当常数。")
+
+    # gap 敏感度:直接量"设了 gap 到底排掉了多少行",而不是相信参数名。
+    print("\n    TimeSeriesSplit 的 gap 敏感度(n_splits=%d, test_size=%d,"
+          " 每月 %d 行):" % (N_SPLITS, TS_TEST_SIZE, ROWS_PER_MONTH))
+    print("      %-8s %-26s %s" % ("gap", "验证行月份重叠(逐折)", "排掉的有效间隔"))
+    for gap in (0, 1, ROWS_PER_MONTH):
+        ov, sizes = [], []
+        for tr_idx, te_idx in TimeSeriesSplit(n_splits=N_SPLITS,
+                                              test_size=TS_TEST_SIZE,
+                                              gap=gap).split(X_fit):
+            tr_m = set(months[tr_idx].tolist())
+            ov.append(sum(1 for idx in te_idx if months[idx] in tr_m))
+            sizes.append(len(te_idx))
+        eff = ("%d 个样本 = %.1f 个月" % (gap, gap / float(ROWS_PER_MONTH))
+               if gap else "无")
+        print("      %-8d %-26s %s" % (gap, ov, eff))
+    print("    ⚠️ **gap 的单位是样本数,不是月份。** gap=1 只排 1 行,")
+    print("       实测与 gap=0 完全一样 —— 参数设了,一行都没排掉。")
+    print("       要排整整一个月必须写 gap=%d。这是本章最尴尬的一处:"
+          % ROWS_PER_MONTH)
+    print("       它正是本章反复警告的形态(看起来设了,其实没生效),"
+          "只不过发生在正确切分的 API 上。")
+    print("    (另一个坑:5 折 + test_size=300 + gap=300 恰好要 1800 行,"
+          "等于全部可用行,sklearn 直接报错。")
+    print("     设了 gap 还得给采样预算让路,所以这里 test_size 收到 %d。)"
+          % TS_TEST_SIZE)
+
+    tscv = TimeSeriesSplit(n_splits=N_SPLITS, test_size=TS_TEST_SIZE,
+                           gap=GAP_ROWS)
+    t_overlaps, t_month_ov, t_sizes = [], [], []
     for tr_idx, te_idx in tscv.split(X_fit):
         t_overlaps.append(len(set(groups[tr_idx]) & set(groups[te_idx])))
         tr_m = set(months[tr_idx].tolist())
         t_month_ov.append(sum(1 for idx in te_idx if months[idx] in tr_m))
         t_sizes.append(len(te_idx))
-    print("\n    TimeSeriesSplit 同一量: 客户 %s / 验证侧 %d;"
+    print("\n    加上 gap=%d 之后: 客户 %s / 验证侧 %d;"
           " 验证行同月份也在训练侧 %s / %s"
-          % (t_overlaps, n_cust_total, t_month_ov,
+          % (GAP_ROWS, t_overlaps, n_cust_total, t_month_ov,
              "/".join(str(s) for s in t_sizes)))
-    print("    ⚠️ 注意**中间那一折是 0**,首尾两折各 150 行:TimeSeriesSplit 的"
-          "\n       首折从最早开始、末折扩到最晚,分界月份会被两边共享。")
-    print("       严格不重叠要显式指定 gap=1 个月(留出预测间隔)。")
-    print("       **即使这样,客户仍然 100% 跨折** —— 那是本场景的正确行为。")
-    print("    客户跨折在时序场景下是**正常的** —— 真实业务就是预测一个老客户"
-          "下个月会不会流失。")
+    print("    **客户仍然全部跨折(%d/%d),那是本场景的正确行为** —— 真实业务就是"
+          % (t_overlaps[0], n_cust_total))
+    print("    预测一个老客户下个月会不会流失。注意这里问的判据是"
+          "\"客户重叠是不是 0\"," )
+    print("    **0 才是 GroupKFold 的正常值,100% 才是问题** —— 别把方向搞反。")
     print("    TimeSeriesSplit 管的是时间方向,不管客户边界;两条线各管各的,"
           "谁也替代不了谁,见 ch03。")
 
@@ -254,9 +351,12 @@ def main():
     print("  网格 C = %s" % (list(C_GRID),))
     chosen = {}
     for cv_name, cv in (("cv=5(原始产出)", 5),
-                        ("TimeSeriesSplit", TimeSeriesSplit(n_splits=3)),
+                        ("TimeSeriesSplit",
+                         TimeSeriesSplit(n_splits=N_SPLITS,
+                                         test_size=TS_TEST_SIZE,
+                                         gap=GAP_ROWS)),
                         ("StratifiedGroupKFold",
-                         StratifiedGroupKFold(n_splits=3))):
+                         StratifiedGroupKFold(n_splits=N_SPLITS))):
         pipe = make_pipeline()
         grid = GridSearchCV(pipe, {"clf__C": list(C_GRID)}, cv=cv,
                             scoring="roc_auc", n_jobs=1)

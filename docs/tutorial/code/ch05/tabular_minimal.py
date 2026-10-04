@@ -647,7 +647,7 @@ def print_weight_table(title, names, w, b, mean_scaled):
     print("    这和 ch02 那张泄漏权重表(前三名合计占 94%)是完全不同的形态。")
 
 
-def run_divergence_probe(sub, epochs=400, seed_label=""):
+def run_divergence_probe(sub, epochs=400, label="dataset"):
     """A 配置(无标准化 + 常数学习率)去掉发散闸跑满 epochs 轮,看它会不会自己回来。
 
     ⚠️ 为什么要专门跑这一次:代码里那行"损失从 ln2 跳走并且回不来"是一个
@@ -682,7 +682,8 @@ def run_divergence_probe(sub, epochs=400, seed_label=""):
         for j in range(nf):
             w[j] -= LEARNING_RATE * (grad_w[j] / m)
         b -= LEARNING_RATE * (grad_b / m)
-    lines = ["epoch %s 验证 BCE: " % "  ".join(str(k) for k in sorted(marks))
+    lines = ["%s —— epoch %s 验证 BCE: "
+             % (label, "  ".join(str(k) for k in sorted(marks)))
              + "  ".join("%.4f" % marks[k] for k in sorted(marks)),
              "%d 轮里的最优是 epoch %d 的 %.4f;ln2 = %.4f"
              % (epochs, best[1], best[0], math.log(2))]
@@ -760,6 +761,7 @@ def main():
     gap = tr_curve[-1] - va_curve[-1]
     floor_fit = binary_entropy(sum(y_fit) / float(len(y_fit)))
     floor_val = binary_entropy(sum(y_val) / float(len(y_val)))
+    overfit = gap - (floor_fit - floor_val)
     print("    训练 %.4f / 验证 %.4f,差 %+.4f"
           % (tr_curve[-1], va_curve[-1], gap))
     print("    ⚠️ 这个差**不是过拟合** —— 过拟合的签名是训练损失**低于**验证损失,"
@@ -772,8 +774,9 @@ def main():
           % (floor_fit - floor_val, gap))
     print("      两者量级一致 -> 差额**主要是分布漂移**(两段基础率不同),"
           "不是模型在背答案。")
-    print("      学出来的过拟合量 = 实测差 - 下限差 = %+.4f(小,且方向上"
-          % (gap - (floor_fit - floor_val)))
+    print("      学出来的过拟合量 = 实测差 - 下限差 = %+.4f" % overfit)
+    print("      (全精度 %.6f;两段各自低于自己下限的量 %.4f / %.4f)"
+          % (overfit, floor_fit - tr_curve[-1], floor_val - va_curve[-1]))
     print("      训练更贴近自己的下限,这是正常的,不是记住了样本)")
     print_ascii_curve("损失曲线", list(range(len(tr_curve))),
                       [("train", tr_curve), ("val", va_curve)])
@@ -787,8 +790,11 @@ def main():
     print("  %-4s %10s %10s %10s %10s %8s"
           % ("种子", "A 验证BCE", "B 验证BCE", "C 验证BCE", "C 验证AUC", "A 发散轮"))
     a_bce, b_bce, c_bce, c_auc, a_div = [], [], [], [], []
+    first_sub = None
     for k in range(COMPARE_SEEDS):
         sub = make_dataset(seed=SEED + 1000 * (k + 1))
+        if k == 0:
+            first_sub = sub      # 探针要跑的是第 0 组,不是循环结束时的最后一组
         f_r, v_r, _ = split_by_month(sub)
         Xa, ya = to_matrix(f_r)
         Xb, yb = to_matrix(v_r)
@@ -811,8 +817,10 @@ def main():
     print("  A 发散 %d/%d 组 —— 缺标准化时固定学习率的批量梯度下降在真实量纲"
           % (sum(d is not None for d in a_div), COMPARE_SEEDS))
     print("     (月费 std %.1f、工单 std %.1f)上一步跨过极小点。" % (stds[1], stds[2]))
-    print("  对照:第 0 组去掉发散闸再跑 400 轮,看它**会不会自己回来** ——")
-    for line in run_divergence_probe(sub, epochs=400):
+    print("  对照:第 0 组(seed %d)去掉发散闸再跑 400 轮,看它**会不会自己回来** ——"
+          % (SEED + 1000))
+    for line in run_divergence_probe(first_sub, epochs=400,
+                                     label="第 0 组 seed=%d" % (SEED + 1000)):
         print("    %s" % line)
     for name, series in (("A(无标准化)", a_bce), ("B(+标准化)", b_bce),
                          ("C(完整实现)", c_bce)):
