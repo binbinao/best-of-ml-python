@@ -49,9 +49,17 @@ def gauss(rng):
 def make_dataset(n=N_APPLICANTS, seed=SEED):
     """构造信贷违约数据集,返回 list[dict]。
 
-    标签由三个连续特征决定(债务率越高越危险、收入稳定性越低越危险、
-    征信年限越短越危险)。partner_channel 与标签**无因果关系**,但它是一个
-    真实存在的运营切分维度,后面第 3 节的反例要用它。
+    标签由两个来源合成,这一点必须写清楚,否则第 5 节的反例会站不住:
+
+    1. **自主件**:标签由三个连续特征决定(债务率越高越危险、收入稳定性
+       越低越危险、征信年限越短越危险)。
+    2. **渠道件**(partner_channel == 1):违约率被**无条件改写**成
+       CHANNEL_DEFAULT(0.85),**完全不再取决于那三个特征**。
+
+    所以 partner_channel 不是一个"从数据里发现的、与标签无关的运营维度",
+    而是生成器直接赋值的一个**构造维度**。第 5 节说"渠道件违约率高达
+    83.33%"时,那个数是这条赋值在测试期的实现值,不是数据里自然长出来的
+    现象。反例的机制可迁移,具体幅度不可迁移。
 
     真实数据集里特征与标签的关系是未知的,这里的生成器只是构造出一个
     "已知真相"的世界,好让后面的对照有确定的答案。
@@ -67,9 +75,18 @@ def make_dataset(n=N_APPLICANTS, seed=SEED):
         logit = -2.45 + 3.0 * debt_ratio - 1.8 * income_stability \
             + 0.05 * (credit_history_years - 6.0)
         p_bad = 1.0 / (1.0 + math.exp(-logit))
-        # 渠道件的违约率是一个**运营事实**:这批人是靠合作方导流来的,
-        # 没有经过自主获客的那套收入核验。它不是泄漏(预测时点拿得到),
-        # 也不是噪声(它真的高度相关),它是一个和业务成本纠缠在一起的现实。
+        # ⚠️ partner_channel 是**生成器直接赋值的构造维度**,不是从数据里
+        # 发现的信号:渠道件的违约率被这一行**无条件改写**成 CHANNEL_DEFAULT
+        # (0.85),完全不再取决于三个连续特征。
+        #
+        # 第 5 段的反例整条建立在这个赋值上。它是必要的:要让"AUC 高但
+        # 业务上不划算"这个现象在可控的幅度内出现,必须有一个高信噪比
+        # 的、与成本结构强耦合的分组变量。
+        #
+        # **代价要说清楚:模型 C 的表现完全来自这一行赋值。** 换到真实数据,
+        # 反例的**机制**(代理指标里没有成本参数)可迁移,具体数字不可迁移。
+        # 真实项目里这个角色由"合作渠道件的尽调强度更低"这类运营事实担任,
+        # 但那需要业务确认,不是从表里看出来的。
         p_eff = CHANNEL_DEFAULT if partner_channel else p_bad
         default = 1 if rng.random() < p_eff else 0
         rows.append({
@@ -223,9 +240,13 @@ def roc_auc_rank_sum(y_true, y_score):
 def roc_auc_trapezoid(y_true, y_score):
     """ROC 曲线下面积,梯形法。**和 sklearn 的算法同构**:
 
-    sklearn 的 roc_auc_score 就是 roc_curve() 的 (fpr, tpr) 交给
-    np.trapezoid。复刻这条路径,才能做"逐位一致"的对照 —— 光说
-    "我的 AUC 和 sklearn 差不多"没有任何验证价值。
+    sklearn 的 roc_auc_score 走 sklearn.metrics._ranking._binary_roc_auc_score,
+    它把 roc_curve() 返回的 (fpr, tpr) 交给 `auc()`,而 `auc()` 的实现是
+    `area = direction * trapezoid(y, x)` —— **trapezoid 来自
+    `scipy.integrate`,不是 numpy**(sklearn 1.9.1,
+    sklearn/metrics/_ranking.py:18 `from scipy.integrate import trapezoid`)。
+    复刻这条路径,才能做"逐位一致"的对照 —— 光说"我的 AUC 和 sklearn
+    差不多"没有任何验证价值。
     """
     n = len(y_score)
     n_pos = sum(y_true)
@@ -280,11 +301,16 @@ def _non_collinear(sequence):
     return keep
 
 
-# numpy 的 float64 求和用分块两两相加(块大小 128),纯 Python 逐个相加会
-# 因为结合顺序不同而在最后一位上差 1 ulp。复刻这个算法,才能声称
-# "逐位一致"—— 少这一段,下面的对照就只是"两位小数一致",不是逐位。
+# scipy.integrate.trapezoid 内部对 numpy 数组做 xp.sum,而 numpy 的 float64
+# 求和用分块两两相加(块大小 128)。纯 Python 逐个相加会因为结合顺序不同,
+# 在最后一位上差 1 ulp。复刻这个算法,才能声称"逐位一致"—— 少这一段,
+# 下面的对照就只是"两位小数一致",不是逐位。
 def pairwise_sum(values):
-    """复刻 numpy 的 pairwise summation(分块 8 路累加,块长 128)。"""
+    """复刻 numpy 的 pairwise summation(分块 8 路累加,块长 128)。
+
+    scipy.integrate.trapezoid 走的是 numpy 的 sum,不是它自己写的求和循环,
+    所以这里对齐的是 numpy 的分块算法。
+    """
     n = len(values)
     if n < 8:
         total = 0.0
@@ -354,14 +380,15 @@ def verify_against_sklearn():
 
     rank_exact = 0
     trap_exact = 0
-    worst_ulp = 0.0
+    rank_is_truth = 0
     for case_id, n, p, ties, y, s in cases:
         mine_rank = roc_auc_rank_sum(y, s)
         mine_trap = roc_auc_trapezoid(y, s)
         theirs = roc_auc_score(y, s)
+        truth = roc_auc_exact_rational(y, s)
         rank_exact += mine_rank == theirs
         trap_exact += mine_trap == theirs
-        worst_ulp = max(worst_ulp, abs(mine_rank - theirs), abs(mine_trap - theirs))
+        rank_is_truth += float(truth) == mine_rank
 
         def verdict(mine):
             if mine == theirs:
@@ -375,9 +402,39 @@ def verify_against_sklearn():
                  verdict(mine_rank), verdict(mine_trap), theirs))
     print("  梯形法(与 sklearn 同构)%d/%d 逐位一致;秩和法 %d/%d 逐位一致"
           % (trap_exact, len(cases), rank_exact, len(cases)))
-    print("  秩和法最大偏差 %.3g(相对 %.1e)—— 算法等价,差在浮点求和顺序上"
-          % (worst_ulp, worst_ulp))
+    # 差异归属:用 Fraction 精确有理数算一遍真值,看是谁偏了。
+    print("  用精确有理数(Fraction)重算真值,秩和法 %d/%d 等于真值"
+          % (rank_is_truth, len(cases)))
+    print("  —— 那两次 1 ulp 差异里,**偏离真值的是 sklearn 的梯形结果**,")
+    print("     手写秩和法给出的是正确舍入值。成因是浮点求和顺序,不是算法差异。")
     return cases, len(cases), trap_exact
+
+
+def roc_auc_exact_rational(y_true, y_score):
+    """用 Fraction 精确有理数算 AUC,得到浮点下的"真值"。
+
+    秩和公式在数学上是精确的;用 Fraction 算就完全绕开了浮点求和顺序。
+    拿它当裁判,才能判断"谁偏了 1 ulp"—— 这是本文件唯一一处允许依赖
+    标准库 fractions 的地方,它只用于**校验**,不参与任何生产计算。
+    """
+    from fractions import Fraction
+    pairs = sorted(zip(y_score, y_true), key=lambda t: t[0])
+    m = len(pairs)
+    ranks = [Fraction(0)] * m
+    i = 0
+    while i < m:
+        j = i
+        while j + 1 < m and pairs[j + 1][0] == pairs[i][0]:
+            j += 1
+        average_rank = Fraction(i + j, 2) + 1
+        for k in range(i, j + 1):
+            ranks[k] = average_rank
+        i = j + 1
+    rank_sum_pos = sum((r for r, (_, label) in zip(ranks, pairs) if label == 1),
+                       Fraction(0))
+    n_pos = sum(y_true)
+    n_neg = m - n_pos
+    return (rank_sum_pos - Fraction(n_pos * (n_pos + 1), 2)) / Fraction(n_pos * n_neg)
 
 
 # ---------------------------------------------------------------------------
@@ -611,6 +668,14 @@ def main():
           % (n_channel, n, 100.0 * n_channel / n,
              100.0 * n_channel_default / n_channel))
     print()
+    print("  ⚠️  两套成本口径的性质不一样,读表前必须分清:")
+    print("     10:1(C_FN=1000 / C_FP=100)= **本章主口径**,真实信贷风控的量级。")
+    print("     1:1 (C_FN=100  / C_FP=100) = **反事实口径,只为演示代理失真而设**。")
+    print("        现实中不存在'误拒一个好客户和放出一笔坏账同价'的场景。")
+    print("        它的作用是提供一个可控的开关:只改成本比,不改数据、不改模型,")
+    print("        看业务赢家会不会换人。**第 5 段的结论依赖这个设定**,")
+    print("        10:1 口径下三个模型的结论是另一回事。")
+    print()
     header = "  %-24s %9s %11s %11s" % ("成本设定", "AUC", "最低成本", "该设定下赢家")
     print(header)
     print("  " + "-" * 78)
@@ -633,20 +698,32 @@ def main():
     c_flat = min_expected_cost(y_test, scores_c, C_FN_FLAT, C_FP_FLAT)
     print("  两个成本设定下 **AUC 的赢家始终是 B,业务成本的赢家换了人**。")
     tp_c, fp_c, fn_c, tn_c = c_flat[1]
-    print("  在 1:1 口径下模型 C 反而最便宜。它的成本最优解是拒掉全部 %d 份渠道件"
-          % (tp_c + fp_c))
-    print("  (其中违约 %d 份),放行其余 %d 份 —— 代价是误拒了 %d 个好客户。"
-          % (tp_c, tn_c + fn_c, fp_c))
-    print("  在 1:1 口径下误拒和坏账同价,这笔交易就划算了;在 10:1 口径下不划算。")
+    print("  C 在 1:1 口径下的最优决策:拒掉 %d 份渠道件(违约 %d 份),放行 %d 份(违约 %d 份)。"
+          % (tp_c + fp_c, tp_c, tn_c + fn_c, fn_c))
+    print()
+    print("  **同一个决策,换一套成本就完全不是一个结论:**")
+    print("  %-34s %10s" % ("决策:拒掉全部 %d 份渠道件" % (tp_c + fp_c), "成本"))
+    print("    1:1  口径(C 的最优解)          %8.2f 元/笔" % c_flat[0])
+    print("    10:1 口径(同一决策,同一分数)  %8.2f 元/笔"
+          % ((C_FN * fn_c + C_FP * fp_c) / float(n)))
+    print("    参照:全拒基线                  %8.2f 元/笔" % reject_all)
+    print("    参照:模型 B(10:1 最优)         %8.2f 元/笔"
+          % min(sweep_thresholds(test, scores_b, C_FN, C_FP), key=lambda r: r["cost"])["cost"])
+    print("  10:1 口径下这个决策比'什么都不做'还贵 %.2f 元 —— 放行的 %d 份违约每份赔 %.0f 元,"
+          % ((C_FN * fn_c + C_FP * fp_c) / float(n) - reject_all, fn_c, C_FN))
+    print("  而拒掉 %d 人只省下 %d 个误拒。**阈值不是模型的属性,是成本结构的属性。**"
+          % (tp_c + fp_c, fp_c))
     print("  **AUC 不会告诉你这件事,因为 AUC 里根本没有成本这两个字。**")
     print()
 
     # ---- 第 6 段:这个差别扛不扛得住抽样波动 ----
     print("-" * 78)
-    print("第 6 段  单次差值不是测量结果:%d 组重采样" % BOOTSTRAP_N)
+    print("第 6 段  单次差值不是测量结果:%d 次重采样 = 8 行比较"
+          % BOOTSTRAP_N)
+    print("        (2 套成本口径 x 2 组模型对 x 2 个指标;bootstrap_compare 被调用 4 次)")
     print("-" * 78)
-    for label, c_fn, c_fp in [("10:1 坏账口径", C_FN, C_FP),
-                              ("1:1 口径", C_FN_FLAT, C_FP_FLAT)]:
+    for label, c_fn, c_fp in [("10:1 坏账口径(主口径)", C_FN, C_FP),
+                              ("1:1 口径(反事实,见第 5 段)", C_FN_FLAT, C_FP_FLAT)]:
         print("  %s" % label)
         for hi_name, lo_name, sc_hi, sc_lo in [("B", "C", scores_b, scores_c),
                                                ("B", "A", scores_b, scores)]:
@@ -669,8 +746,10 @@ def main():
         best_acc["threshold"], best_cost["threshold"],
         best_acc["cost"] / best_cost["cost"]))
     print("  2. AUC 是全局成对统计量,lift 是某一档名单的响应率比,两者不可换算。")
-    print("  3. 换一套成本口径,业务成本的赢家就变了,AUC 的赢家不变 ——")
-    print("     因为 AUC 眼里所有正负配对等权,业务不。")
+    print("  3. 换一套成本口径(第 5 段的 1:1 是**反事实口径**),业务成本的赢家")
+    print("     就变了,AUC 的赢家不变 —— 因为 AUC 眼里所有正负配对等权,业务不。")
+    print("     换人证明的是**机制**,不是'C 是更好的模型';主口径 10:1 下三个")
+    print("     模型的结论一致。")
     print()
     print("  跑完 %.2f 秒" % (time.time() - started))
     return 0

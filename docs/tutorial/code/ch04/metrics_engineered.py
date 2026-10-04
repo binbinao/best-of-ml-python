@@ -32,6 +32,12 @@
     ⚠️  ⚠️  100% 显著),但换到 1:1 成本口径后,C 反而比 B 便宜 3.09 元/笔
     ⚠️  ⚠️  (同样 300 组重采样,100% 显著)。**AUC 里没有成本,所以 AUC 对
     ⚠️  ⚠️  这次换人完全无感。** 见第 4 段,重采样见 metrics_minimal 第 6 段。
+    ⚠️  ⚠️
+    ⚠️  ⚠️  ⚠️  那个 1:1 口径是**反事实设定**,不是本章主口径(10:1):现实中
+    ⚠️  ⚠️  ⚠️  不存在"误拒一个好客户和放出一笔坏账同价"的场景。它只用来
+    ⚠️  ⚠️  ⚠️  提供一个可控开关 —— 不改数据、不改模型,只改成本比,看业务赢家
+    ⚠️  ⚠️  ⚠️  会不会换人。换人证明的是**机制**(代理指标不含成本参数),
+    ⚠️  ⚠️  ⚠️  **不是"C 是更好的模型"**。10:1 主口径下三个模型结论一致。
     ⚠️
     ⚠️  sklearn 给了 roc_auc_score / precision_recall_curve / 各种 metric,
     ⚠️  但它**没有一个参数是"漏批赔 1000、误批赔 100"**。成本必须你自己
@@ -246,8 +252,11 @@ def main():
     print("  模型 B  宽信号 + 渠道标记")
     print("  模型 C  只用渠道标记(1 个二值特征)")
     print()
-    print("  %-8s %10s %14s %14s" % ("模型", "AUC", "10:1 最低成本", "1:1 最低成本"))
-    print("  " + "-" * 50)
+    print("  ⚠️  口径说明:10:1(C_FN=1000/C_FP=100)是主口径;1:1 是**反事实口径**,")
+    print("     现实中不存在误拒与坏账同价的场景,它只为演示代理失真而设。")
+    print()
+    print("  %-8s %10s %16s %18s" % ("模型", "AUC", "10:1 最低成本(主)", "1:1 最低成本(反事实)"))
+    print("  " + "-" * 56)
     winners = {}
     for name in ("A", "B", "C"):
         sc_v = models[name]
@@ -256,23 +265,26 @@ def main():
         c11 = min_expected_cost(list(y_test), [float(s) for s in sc_v],
                                 C_FN_FLAT, C_FP_FLAT)[0]
         winners[name] = (auc_v, c10, c11)
-        print("  %-8s %10.4f %14.2f %14.2f" % (name, auc_v, c10, c11))
+        print("  %-8s %10.4f %16.2f %18.2f" % (name, auc_v, c10, c11))
     print()
     auc_winner = max(winners, key=lambda k: winners[k][0])
     cost_winner_10 = min(winners, key=lambda k: winners[k][1])
     cost_winner_11 = min(winners, key=lambda k: winners[k][2])
-    print("  AUC 赢家     %s (%.4f)" % (auc_winner, winners[auc_winner][0]))
-    print("  10:1 成本赢家 %s (%.2f 元/笔)" % (cost_winner_10, winners[cost_winner_10][1]))
-    print("  1:1  成本赢家 %s (%.2f 元/笔)" % (cost_winner_11, winners[cost_winner_11][2]))
+    print("  AUC 赢家(与成本口径无关)      %s (%.4f)" % (auc_winner, winners[auc_winner][0]))
+    print("  10:1 成本赢家(主口径)          %s (%.2f 元/笔)" % (cost_winner_10, winners[cost_winner_10][1]))
+    print("  1:1  成本赢家(反事实口径)      %s (%.2f 元/笔)" % (cost_winner_11, winners[cost_winner_11][2]))
     print()
     if cost_winner_10 == cost_winner_11 == auc_winner:
         print("  ⚠️ 本次运行三者是同一个赢家 —— 与 minimal 第 5 段不一致,别下结论。")
     else:
         print("  **AUC 的赢家不随成本口径变,业务成本的赢家变了。**")
+        print("  注意这个'换人'发生在**反事实口径**下:主口径(10:1)里三个模型")
+        print("  的结论仍然一致。这次换人证明的是**机制** —— 代理指标里没有成本")
+        print("  参数,所以它对成本口径的变化完全无感 —— 而不是'C 是更好的模型'。")
         print("  roc_auc_score 里没有任何一个参数能表达'漏批赔 %.0f、误拒赔 %.0f',"
               % (C_FN_FLAT, C_FP_FLAT))
-        print("  所以它对这次换人**完全无感**。第 1 段那个 accuracy 陷阱是同一个问题的")
-        print("  低端版本:不是选错了指标,是根本没把业务代价写进评估。")
+        print("  第 1 段那个 accuracy 陷阱是同一个问题的低端版本:不是选错了指标,")
+        print("  是根本没把业务代价写进评估。")
     print()
 
     # ---- 5. 结论 + 重采样由 minimal 提供 ----
@@ -290,19 +302,28 @@ def main():
     print()
 
     # ---- 与 minimal 的逐位对照 ----
-    print("  与 metrics_minimal.py 的逐位对照(同一批分数,两个 AUC 实现):")
+    print("  与 metrics_minimal.py 的对照,分两半说清楚:")
+    print()
     sk_auc_a = roc_auc_score(y_test, models["A"])
     my_auc_a = roc_auc_rank_sum([r["default"] for r in test],
                                 [float(s) for s in models["A"]])
-    print("    模型 A  sklearn %.17f" % sk_auc_a)
-    print("    模型 A  手写     %.17f" % my_auc_a)
-    print("    差 %.2e —— 两条算法路径不同(metrics_minimal 第 1 段已逐位对照过)"
+    print("    [AUC 侧 —— 真的跨库验证] sklearn roc_auc_score %.17f" % sk_auc_a)
+    print("    [AUC 侧]                          手写秩和法     %.17f" % my_auc_a)
+    print("    差 %.2e。两条是**不同的库**(sklearn vs 纯标准库),"
           % abs(sk_auc_a - my_auc_a))
+    print("    所以第 3 节那个反例的 AUC 侧确实排除了'手写实现有 bug'。")
     print()
-    print("    成本 %.2f 元/笔 (sklearn roc_curve 路径) vs %.2f 元/笔 (手写扫描路径)"
-          % (min_expected_cost(list(y_test), [float(s) for s in models["A"]], C_FN, C_FP)[0],
-             min(sweep_thresholds_records(y_test, models["A"]), key=lambda r: r["cost"])["cost"]))
-    print("    两条路径独立算出同一个成本,说明第 1 段的对照不是同一份代码跑两遍。")
+    cost_fast = min_expected_cost(list(y_test), [float(s) for s in models["A"]],
+                                  C_FN, C_FP)[0]
+    cost_slow = min(sweep_thresholds_records(y_test, models["A"]),
+                    key=lambda r: r["cost"])["cost"]
+    print("    [成本侧 —— 不是跨库验证] min_expected_cost %.2f 元/笔" % cost_fast)
+    print("    [成本侧]                    sweep_thresholds %.2f 元/笔" % cost_slow)
+    print("    ⚠️  这两个函数**都来自 metrics_minimal.py**,都是纯 Python,")
+    print("        都不碰 sklearn 也不碰 numpy。它们一致只说明**同一份代码的")
+    print("        两条扫描写法自洽**(O(n log n) 增量 vs O(n^2) 暴力),")
+    print("        **不构成对 sklearn 的独立验证** —— sklearn 根本没有")
+    print("        成本最优阈值这个 API,成本侧至今只有手写实现。")
     print()
 
     print("-" * 78)
