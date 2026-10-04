@@ -18,6 +18,18 @@ AI 写代码的时代,你的价值是定义业务问题、理解原理门槛、�
 
 Part II(数据与领域)、Part III(LLM 时代)、Part IV(可信与规模)待续。
 
+## 环境准备
+
+手写实现(各章的 `*_minimal.py`)只用 Python 标准库,无需安装任何依赖。
+
+AI 工程版(各章的 `*_engineered.py`)需要 scikit-learn:
+
+```bash
+/opt/homebrew/bin/python3 -m pip install -r requirements-tutorial.txt
+```
+
+验证环境:Python 3.14.8,scikit-learn 1.9.1,numpy 2.5.3。
+
 ## 仓库实战
 
 导航节命令依赖历史数据库,首次使用先构建:
