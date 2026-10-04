@@ -27,17 +27,29 @@ ch02 讲的是"字段在预测时点拿不到"。本章讲的是另一半:**字�
 
 对照这两种估计器,能看出一件比"随机切分更好"重要得多的事:
 切分的影响**取决于模型能不能记住实体**,而这件事你在切分之前
-通常不知道。实测:换到按设备留出,设备先验从 0.78 塌到 0.50,而逻辑
-回归从 0.80 走到 0.79 几乎没动。**所以"随机切分一定让指标虚高"是
-错的** —— 虚高的只有会记实体的那种模型,也就是最容易被业务接受的那种。
+通常不知道。
+
+  - 对 A(记实体),代价可测。在"设备见过、但未来没见过"的 160 条干净
+    测试行上 A 只有 0.5963;同一份数据、同一个估计器,随机切分给它
+    0.7794。**这才是泄漏的真实代价** —— 不是 group 切分太严把分数压没了,
+    是随机切分让估计器白拿了本该拿不到的信息。
+  - 对 B(不记实体),切分换不换基本没差。group 切分下 B 的 AUC 恒为
+    0.5000 的是恒等式(见结论 1),真正的对照是 30 组种子重采样:
+    AUC(group) - AUC(random) 均值 -0.0058、95% CI [-0.0228, +0.0112],
+    区间跨零,group 优于 random 的种子只占 43.3%。
+
+**所以"随机切分一定让指标虚高"是错的** —— 虚高的只有会记实体的那种
+模型,也就是最容易被业务接受的那种。
 
 四行切分对照(三个函数,group_split 按粒度跑两次):
-  random_split          打乱行
+  random_split          打乱行(测试 20%)
   time_split            前 80% 的日子训练,后 20% 测试
-  group_split(device)   随机留出 25% 的设备
-  group_split(factory)  整座工厂留作测试
+  group_split(device)   随机留出 25% 设备(留 15 台,对齐 sklearn 的
+                        GroupShuffleSplit(test_size=0.25))
+  group_split(factory)  整座工厂留作测试(留环境应力最高的那座)
 
-跑完约 1 秒。教学代码以可读性优先,不做任何性能优化。
+跑完约 4 秒,其中 3 秒花在结论里的 30 组种子重采样上。教学代码以
+可读性优先,不做任何性能优化。
 
 用法:
     /opt/homebrew/bin/python3 docs/tutorial/code/ch03/splits_minimal.py
@@ -54,7 +66,10 @@ N_DEVICES = N_FACTORIES * DEVICES_PER_FACTORY
 DAYS_PER_DEVICE = 20
 N_ROWS = N_DEVICES * DAYS_PER_DEVICE
 
-TEST_FRACTION = 0.2
+TEST_FRACTION = 0.2        # random_split / time_split 的测试集占比
+GROUP_TEST_FRACTION = 0.25  # group_split 的留出组占比 —— 必须与 sklearn 的
+# GroupShuffleSplit(test_size=0.25) 对齐,否则两份代码的 group 切分根本不是
+# 同一切分,"0/12 vs 0/15"的差异会被误读成实现不同,其实只是参数不同。
 EPOCHS = 200
 LEARNING_RATE = 0.5
 
@@ -200,10 +215,11 @@ def time_split(records, indices, test_fraction=TEST_FRACTION):
     return train_idx, test_idx
 
 
-def group_split(records, indices, test_fraction=TEST_FRACTION, level="device", seed=SEED):
+def group_split(records, indices, test_fraction=GROUP_TEST_FRACTION, level="device", seed=SEED):
     """group 切分:整组留出,组内记录永不跨边界。
 
-    level="device"  随机留出 25% 的设备(等价于 sklearn 的 GroupShuffleSplit)
+    level="device"  随机留出 25% 的设备(对应 sklearn 的 GroupShuffleSplit(
+                    test_size=0.25),两边留出同样的 15 台)
     level="factory" 整座工厂留作测试 —— 新工厂到货,一台老设备都没见过
 
     两种粒度都能把重叠压到 0,但只有后一种会暴露工厂之间的分布偏移。
@@ -304,6 +320,22 @@ def device_prior_predict(records, train_idx, test_idx):
     return preds, fallback
 
 
+def seen_device_subset(records, train_idx, test_idx):
+    """把测试集切成"设备在训练集出现过"与"没出现过"两半,返回后者的行号。
+
+    为什么需要这个函数:group 切分下设备交叠恒为 0,设备先验对**每一条**
+    测试行都退回常数,AUC 必然是 0.5。那是切分定义直接蕴含的恒等式,
+    不是测量结果 —— 拿它和随机切分的 0.78 并列比较,是在拿构造性常数
+    和随机变量作比较。
+
+    真正能测的是这另一半:时序切分下,一部分测试行属于"训练期已在场、
+    但未来没见过的设备"。在那半边上,设备先验既不是常数、边界又是干净的,
+    它的 AUC 才是可比的数字。
+    """
+    seen = {records[i]["device"] for i in train_idx}
+    return [j for j, i in enumerate(test_idx) if records[i]["device"] not in seen]
+
+
 def column_moments(records, indices):
     """训练集的 (均值, 标准差),只从训练集算。"""
     means, stds = [], []
@@ -386,6 +418,40 @@ def roc_auc(y_true, y_pred):
 # ---------------------------------------------------------------------------
 # 5. 主体:四行切分,两个估计器
 # ---------------------------------------------------------------------------
+SEED_SWEEP_N = 30  # 切分抽样重采样次数 —— 单次差值不足以支撑任何方向性结论
+SWEEP_EPOCHS = 60  # 重采样里的训练轮数砍半:这里比的是切分,不是收敛
+
+
+def seed_sweep(records, all_idx, n=SEED_SWEEP_N):
+    """重采样 n 组种子,测两种切分下逻辑回归 AUC 差值的分布。
+
+    这一段存在的唯一理由:**单次切分差值不是测量结果。** 切分抽样本身
+    带来 sd≈0.05 的波动,而 group 与 random 的系统性差异远小于这个量。
+    只报一个种子的差值(哪怕它是 4 位小数)就是在报告噪声。
+
+    为了控制运行时间,重采样里的梯度下降轮数用 SWEEP_EPOCHS(比主流程
+    少)。这只影响单次 AUC 的绝对值,不影响配对差值(group 与 random
+    各自独立训练,轮数对两边的偏差相同)。
+    """
+    diffs, rands, devs = [], [], []
+    for s in range(n):
+        rtr, rte = random_split(records, all_idx, seed=s)
+        gtr, gte = group_split(records, all_idx, level="device", seed=s)
+        y_r = [records[i]["failed"] for i in rtr]
+        y_g = [records[i]["failed"] for i in gtr]
+        mr, sr = column_moments(records, rtr)
+        mg, sg = column_moments(records, gtr)
+        w_r, b_r, _ = train_logistic_regression(design(records, rtr, mr, sr), y_r, epochs=SWEEP_EPOCHS)
+        w_g, b_g, _ = train_logistic_regression(design(records, gtr, mg, sg), y_g, epochs=SWEEP_EPOCHS)
+        auc_r = roc_auc([records[i]["failed"] for i in rte], predict_proba(design(records, rte, mr, sr), w_r, b_r))
+        auc_g = roc_auc([records[i]["failed"] for i in gte], predict_proba(design(records, gte, mg, sg), w_g, b_g))
+        diffs.append(auc_g - auc_r)
+        rands.append(auc_r)
+        dp, _ = device_prior_predict(records, rtr, rte)
+        devs.append(roc_auc([records[i]["failed"] for i in rte], dp))
+    return diffs, rands, devs
+
+
 SPLITS = [
     ("random_split", "整行打乱", lambda r, i: random_split(r, i)),
     ("time_split", "前 80% 的日子", lambda r, i: time_split(r, i)),
@@ -432,6 +498,15 @@ def main():
         preds_a, fallback = device_prior_predict(records, train_idx, test_idx)
         auc_a = roc_auc(y_test, preds_a)
 
+        # 非退化子集:排除"设备没见过"的测试行。group 切分下这个子集是空的,
+        # AUC 记为 nan;只有 time_split 能给出可比的数字。
+        unseen = set(seen_device_subset(records, train_idx, test_idx))
+        kept = [k for k in range(len(test_idx)) if k not in unseen]
+        if kept:
+            auc_a_kept = roc_auc([y_test[k] for k in kept], [preds_a[k] for k in kept])
+        else:
+            auc_a_kept = float("nan")
+
         means, stds = column_moments(records, train_idx)
         X_train = design(records, train_idx, means, stds)
         X_test = design(records, test_idx, means, stds)
@@ -452,6 +527,8 @@ def main():
                 "d_hours": d_hours,
                 "d_ambient": d_ambient,
                 "auc_a": auc_a,
+                "auc_a_kept": auc_a_kept,
+                "n_kept": len(kept),
                 "auc_b": auc_b,
                 "fallback": fallback,
             }
@@ -483,24 +560,69 @@ def main():
                   % (r["name"], r["fallback"], r["n_test"]))
     print()
 
-    rnd, dev, fac = rows[0], rows[2], rows[3]
-    print("=== 结论:四个数字,四件不同的事 ===")
-    print("  1) 设备先验 %.4f (random) -> %.4f (按设备留出),掉 %.4f。"
-          % (rnd["auc_a"], dev["auc_a"], rnd["auc_a"] - dev["auc_a"]))
-    print("     每条测试行退回常数,因为它要的那台设备一台都没见过。")
-    print("     **这不是 bug,这是真能力被正确地否掉了** —— 上线换新设备时,")
-    print("     这个模型确实只能给常数。")
-    print("  2) 逻辑回归 %.4f (random) -> %.4f (按设备留出),%+.4f。"
+    rnd, tim, dev, fac = rows[0], rows[1], rows[2], rows[3]
+
+    # 切分抽样重采样:单次差值不是测量结果,这一组才是
+    sweep, rands, devs = seed_sweep(records, all_idx)
+    sweep_mean = sum(sweep) / len(sweep)
+    sweep_var = sum((d - sweep_mean) ** 2 for d in sweep) / (len(sweep) - 1)
+    sweep_sd = math.sqrt(sweep_var)
+    sweep_se = sweep_sd / math.sqrt(len(sweep))
+    sweep_lo, sweep_hi = sweep_mean - 1.96 * sweep_se, sweep_mean + 1.96 * sweep_se
+    sweep_win = sum(1 for d in sweep if d > 0) / len(sweep)
+    single = rnd["auc_b"] - dev["auc_b"]
+    pct = 100.0 * sum(1 for d in sweep if d <= single) / len(sweep)
+    n_larger = sum(1 for d in sweep if d > single)
+    rnd_mean = sum(rands) / len(rands)
+    rnd_var = sum((a - rnd_mean) ** 2 for a in rands) / (len(rands) - 1)
+    rnd_sd = math.sqrt(rnd_var)
+    dev_mean = sum(devs) / len(devs)
+    dev_var = sum((a - dev_mean) ** 2 for a in devs) / (len(devs) - 1)
+    dev_sd = math.sqrt(dev_var)
+
+    print("=== 结论 ===")
+    print("  1) 设备先验在 group 切分下恒为 0.5000,**这不是测量值,是恒等式**:")
+    print("     设备交叠为 0,每条测试行都退回常数,常数预测的 AUC 就是 0.5。")
+    print("     所以别拿它和随机切分的 %.4f 比差额 —— 那是拿构造性常数和"
+          % rnd["auc_a"])
+    print("     随机变量作比较。可比的数字在下一行。")
+    print()
+    print("  2) 非退化度量:只看**设备见过、但未来没见过**的测试行")
+    print("       time_split  %d/%d 行,设备先验 AUC = %.4f"
+          % (tim["n_kept"], tim["n_test"], tim["auc_a_kept"]))
+    print("       random_split 同样的子集上 A = %.4f(全部 %d 行)" % (rnd["auc_a"], rnd["n_test"]))
+    print("     边界是干净的(未来行泄漏 = 0),设备先验仍然只有 %.4f ——"
+          % tim["auc_a_kept"])
+    print("     同一份数据、同一个估计器,随机切分给它 %.4f。" % rnd["auc_a"])
+    print("     这个差距**远超切分抽样噪声**(随机切分下该估计器的 30 组种子")
+    print("     分布见下),所以它不是运气,是泄漏。")
+    print()
+    print("  3) 逻辑回归 %.4f (random) -> %.4f (按设备留出),%+.4f。"
           % (rnd["auc_b"], dev["auc_b"], dev["auc_b"] - rnd["auc_b"]))
-    print("     **注意它没掉。** 随机切分对『不记实体』的模型没有系统性乐观,")
-    print("     反而因为同类样本被稀释而略吃亏。所以本章不是『随机切分一定")
-    print("     让指标虚高』,而是『随机切分对会记实体的模型虚高』。")
-    print("  3) hours_z 均值差:random %+.4f / time %+.4f / 按厂 %+.4f。"
-          % (rnd["d_hours"], rows[1]["d_hours"], fac["d_hours"]))
+    print("     **单看这一个数得不出结论。** 下面这组数字才是测量结果:")
+    print()
+    print("=== 切分抽样重采样:%d 组种子,同数据集同模型结构 ===" % len(sweep))
+    print("  AUC(group) - AUC(random):均值 %+.4f,标准差 %.4f" % (sweep_mean, sweep_sd))
+    print("  95%% 置信区间 [%+.4f, %+.4f]" % (sweep_lo, sweep_hi))
+    print("  group 优于 random 的种子占比 %.1f%%" % (100.0 * sweep_win))
+    print("  随机切分本身的 AUC:均值 %.4f,标准差 %.4f" % (rnd_mean, rnd_sd))
+    print("  设备先验在随机切分下:均值 %.4f,标准差 %.4f,范围 [%.4f, %.4f]"
+          % (dev_mean, dev_sd, min(devs), max(devs)))
+    print("  —— 第 2 条那个 %.4f 落在**这条分布之外**,所以它不是抽样运气。"
+          % tim["auc_a_kept"])
+    print()
+    print("  单次效应 %+.4f 落在第 %.1f 百分位 —— 只有 %d/%d 个种子比它更正。"
+          % (rnd["auc_b"] - dev["auc_b"], pct, n_larger, len(sweep)))
+    print("  **结论:两种切分对这个不记实体的模型差异极小(sd 的量级是效应的")
+    print("  数倍),既不能说『group 更保守所以更差』,也不能说『随机虚高』。**")
+    print("  本章能测到代价的是第 2 条,不是这条。")
+    print()
+    print("  4) hours_z 均值差:random %+.4f / time %+.4f / 按厂 %+.4f。"
+          % (rnd["d_hours"], tim["d_hours"], fac["d_hours"]))
     print("     时序切分的偏移最大,这是**老设备磨损到后期**的真实漂移,")
     print("     随机切分几乎测不到(%.4f)。" % rnd["d_hours"])
-    print("  4) ambient 均值差:random %+.4f / time %+.4f / 按厂 %+.4f。"
-          % (rnd["d_ambient"], rows[1]["d_ambient"], fac["d_ambient"]))
+    print("  5) ambient 均值差:random %+.4f / time %+.4f / 按厂 %+.4f。"
+          % (rnd["d_ambient"], tim["d_ambient"], fac["d_ambient"]))
     print("     时序切分测不到工厂差异(交错进场,时间上完全抵消);只有整厂")
     print("     留出才测得到。**两个切分修的是两条不同的线,不能互相替代。**")
     print()
